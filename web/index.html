@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LexDiff — AI-анализ нормативных актов РБ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════
+     SIDEBAR
+     ═══════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="9" y1="13" x2="15" y2="13"/>
+        <line x1="9" y1="17" x2="12" y2="17"/>
+      </svg>
+    </div>
+    <div class="sb-brand-text">
+      <span class="sb-name">LexDiff</span>
+      <span class="sb-tier">Enterprise</span>
+    </div>
+  </div>
+
+  <nav class="sb-nav">
+    <span class="sb-section">Platform</span>
+
+    <div class="sb-group">
+      <button class="sb-group-toggle open" onclick="toggleSbGroup(this,'sg-workspace')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Workspace
+        <svg class="sb-arr" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>
+      </button>
+      <div class="sb-sub" id="sg-workspace">
+        <!-- data-page — ключ роутера showPage() -->
+        <a class="sb-link active" href="#" data-page="acts" onclick="showPage('acts');return false;">
+          Акты <span class="sb-badge" id="sb-acts-cnt">15</span>
+        </a>
+        <a class="sb-link" href="#" data-page="upload" onclick="showPage('upload');return false;">Загрузить акты</a>
+        <a class="sb-link" href="#" data-page="chain" onclick="showPage('chain');return false;">Цепочка редакций</a>
+        <a class="sb-link" href="#" data-page="assistant" onclick="showPage('assistant');return false;">
+          Ассистент <span class="sb-badge-dot"></span>
+        </a>
+      </div>
+    </div>
+
+    <span class="sb-section" style="margin-top:8px">Projects</span>
+
+    <div class="sb-group">
+      <button class="sb-group-toggle open" onclick="toggleSbGroup(this,'sg-proj1')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="0.5"/><rect x="14" y="3" width="7" height="7" rx="0.5"/><rect x="14" y="14" width="7" height="7" rx="0.5"/><rect x="3" y="14" width="7" height="7" rx="0.5"/></svg>
+        Трудовое право
+        <svg class="sb-arr" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>
+      </button>
+      <div class="sb-sub" id="sg-proj1">
+        <a class="sb-link" href="#" onclick="openActDetailById(1);return false;">ПВТР ООО ТехПром</a>
+        <a class="sb-link" href="#" onclick="return false;">Положение об ОТ</a>
+      </div>
+    </div>
+
+    <a class="sb-item" href="#" onclick="return false;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+      Налоговое право
+    </a>
+    <a class="sb-item" href="#" onclick="return false;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      Административное
+    </a>
+    <a class="sb-item sb-muted" href="#" onclick="return false;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+      More
+    </a>
+  </nav>
+
+  <!-- Подсказка горячих клавиш -->
+  <div class="sb-kbhint" onclick="openShortcuts()">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>
+    Горячие клавиши
+    <kbd class="sb-kbd">?</kbd>
+  </div>
+
+  <!-- Пользователь -->
+  <div class="sb-user">
+    <div class="sb-ava">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.31 3.58-6 8-6s8 2.69 8 6"/></svg>
+    </div>
+    <div class="sb-user-info">
+      <span class="sb-uname">shadcn</span>
+      <span class="sb-uemail">m@example.com</span>
+    </div>
+    <svg class="sb-uchev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════
+     MAIN
+     ═══════════════════════════════════════ -->
+<main class="main" id="main">
+
+  <!-- Мобильный хедер -->
+  <div class="mob-header">
+    <button class="mob-menu-btn" onclick="toggleMobSidebar()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="mob-brand">LexDiff</span>
+    <button class="btn-dark btn-sm mob-upload-btn" onclick="showPage('upload')">+ Загрузить</button>
+  </div>
+  <div class="mob-overlay hidden" id="mob-overlay" onclick="toggleMobSidebar()"></div>
+
+  <!-- ══════════════════════
+       PAGE: ACTS
+       BACKEND: GET /api/acts?search=&type=&risk=&page=&perPage=
+       Ответ: { items: Act[], total, page, perPage }
+       ══════════════════════ -->
+  <div class="page" id="page-acts">
+    <div class="page-topnav">
+      <button class="topnav-btn active" data-page="acts" onclick="showPage('acts')">Акты</button>
+      <button class="topnav-btn" data-page="assistant" onclick="showPage('assistant')">Ассистент</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <!-- BACKEND: debounce 300мс → GET /api/acts?search= -->
+        <input id="acts-search" class="search-input" type="text" placeholder="Поиск по названию, организации..."/>
+      </div>
+      <div class="filter-chips" id="acts-type-filter">
+        <button class="fchip active" onclick="filterActs('type','all',this)">Все</button>
+        <button class="fchip" onclick="filterActs('type','ЛНА',this)">ЛНА</button>
+        <button class="fchip" onclick="filterActs('type','НПА',this)">НПА</button>
+      </div>
+      <div class="filter-chips" id="acts-risk-filter">
+        <button class="fchip" onclick="filterActs('risk','red',this)"><span class="rdot r"></span>Противоречие</button>
+        <button class="fchip" onclick="filterActs('risk','orange',this)"><span class="rdot o"></span>Проверить</button>
+        <button class="fchip" onclick="filterActs('risk','green',this)"><span class="rdot g"></span>Безопасно</button>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn-outline" onclick="showPage('upload')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Добавить акт
+        </button>
+        <div class="view-switch">
+          <button class="vsw active" id="vsw-grid" onclick="setView('grid')" title="Сетка (V)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </button>
+          <button class="vsw" id="vsw-list" onclick="setView('list')" title="Список">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BACKEND: генерируется из GET /api/acts -->
+    <div class="acts-grid" id="acts-grid"></div>
+    <div class="acts-list hidden" id="acts-list"></div>
+
+    <div class="acts-pagination">
+      <span id="acts-pg-info">Показано 1–15 из 15</span>
+      <div class="pg-btns">
+        <button class="pg-b" onclick="actsPage(-1)">‹</button>
+        <button class="pg-b" onclick="actsPage(1)">›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: ACT DETAIL
+       BACKEND: GET /api/acts/:id → Act
+                GET /api/acts/:id/versions → Version[]
+       ══════════════════════ -->
+  <div class="page hidden" id="page-act-detail">
+    <div class="page-topnav">
+      <button class="topnav-btn" onclick="showPage('acts')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15,18 9,12 15,6"/></svg>
+        Назад
+      </button>
+    </div>
+    <div class="detail-header">
+      <div>
+        <h1 class="detail-title" id="detail-title">Правила внутреннего трудового распорядка</h1>
+        <p class="detail-sub" id="detail-sub">ООО «ТехПром» · 5 версий</p>
+      </div>
+      <div class="detail-header-actions">
+        <!-- BACKEND: POST /api/compare { actId, versionIds:[v1,v2] } → jobId -->
+        <button class="btn-dark" onclick="showPage('compare-table')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="9" height="18" rx="1"/><rect x="13" y="3" width="9" height="18" rx="1"/></svg>
+          Сравнить версии
+        </button>
+        <!-- BACKEND: GET /api/acts/:id/chain -->
+        <button class="btn-outline" onclick="showPage('chain')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+          Цепочка редакций
+        </button>
+      </div>
+    </div>
+
+    <div class="toolbar" style="margin-bottom:12px">
+      <div class="search-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/></svg><input class="search-input" type="text" placeholder="Фильтровать версии..."/></div>
+      <button class="fchip"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Риск</button>
+      <button class="btn-outline" style="margin-left:auto" onclick="">Изменить вид</button>
+    </div>
+
+    <div class="versions-tbl">
+      <div class="vtbl-head">
+        <div><input type="checkbox" id="vsel-all" onchange="selectAllVersions(this)"/></div>
+        <div>Версия</div><div>Дата</div><div>Автор</div><div>Изменений</div><div>Риск</div><div></div>
+      </div>
+      <!-- BACKEND: строки из GET /api/acts/:id/versions -->
+      <div class="vtbl-row"><div><input type="checkbox" class="v-check"/></div><div class="vtbl-ver">1</div><div>12.02.2025</div><div>Иванов А.П.</div><div>П.2.4</div><div><span class="bdg bdg-r">Противоречие</span></div><div><button class="dots-btn" onclick="versionMenu(event,1)">···</button></div></div>
+      <div class="vtbl-row"><div><input type="checkbox" class="v-check"/></div><div class="vtbl-ver">2</div><div>05.11.2024</div><div>Петрова О.С.</div><div>Статья 5</div><div><span class="bdg bdg-o">Проверить</span></div><div><button class="dots-btn" onclick="versionMenu(event,2)">···</button></div></div>
+      <div class="vtbl-row"><div><input type="checkbox" class="v-check"/></div><div class="vtbl-ver">3</div><div>14.07.2024</div><div>Сидоров К.В.</div><div>П.4.1</div><div><span class="bdg bdg-o">Проверить</span></div><div><button class="dots-btn" onclick="versionMenu(event,3)">···</button></div></div>
+      <div class="vtbl-row"><div><input type="checkbox" class="v-check"/></div><div class="vtbl-ver">4</div><div>02.03.2024</div><div>Иванов А.П.</div><div>—</div><div><span class="bdg bdg-g">Безопасно</span></div><div><button class="dots-btn" onclick="versionMenu(event,4)">···</button></div></div>
+      <div class="vtbl-row"><div><input type="checkbox" class="v-check"/></div><div class="vtbl-ver">5</div><div>10.01.2024</div><div>Петрова О.С.</div><div>—</div><div><span class="bdg bdg-g">Безопасно</span></div><div><button class="dots-btn" onclick="versionMenu(event,5)">···</button></div></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: UPLOAD
+       BACKEND:
+         POST /api/upload FormData → { fileId, name, size }
+         POST /api/compare { oldFileId, newFileId } → { jobId }
+         GET  /api/jobs/:jobId/status → { status, progress, step }
+       ══════════════════════ -->
+  <div class="page hidden" id="page-upload">
+    <div class="upload-wrap">
+      <div class="upload-hero">
+        <h1 class="upload-h1">Сравнение редакций НПА</h1>
+        <p class="upload-sub">Загрузите две версии нормативного акта — AI выявит структурные и семантические изменения и проверит соответствие законодательству Республики Беларусь</p>
+      </div>
+
+      <div class="upload-pair">
+        <div class="upload-card">
+          <div class="uc-hdr"><h3>Старая версия</h3><p>Загрузите предыдущую редакцию правового акта</p></div>
+          <div class="dz" id="dz-old" ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event,'old')" onclick="document.getElementById('fi-old').click()">
+            <div class="dz-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg></div>
+            <p class="dz-text">Перетащите файл или нажмите для поиска</p>
+            <p class="dz-hint">Только DOCX и PDF файлы</p>
+            <button class="dz-btn" onclick="event.stopPropagation();document.getElementById('fi-old').click()">Смотреть файлы</button>
+            <input type="file" id="fi-old" accept=".docx,.pdf" style="display:none" onchange="fiSel(event,'old')"/>
+          </div>
+          <div class="fp hidden" id="fp-old"></div>
+        </div>
+
+        <div class="upload-sep"><div class="sep-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/></svg></div></div>
+
+        <div class="upload-card">
+          <div class="uc-hdr"><h3>Новая версия</h3><p>Загрузите обновлённую редакцию документа</p></div>
+          <div class="dz" id="dz-new" ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event,'new')" onclick="document.getElementById('fi-new').click()">
+            <div class="dz-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg></div>
+            <p class="dz-text">Перетащите файл или нажмите для поиска</p>
+            <p class="dz-hint">Только DOCX и PDF файлы</p>
+            <button class="dz-btn" onclick="event.stopPropagation();document.getElementById('fi-new').click()">Смотреть файлы</button>
+            <input type="file" id="fi-new" accept=".docx,.pdf" style="display:none" onchange="fiSel(event,'new')"/>
+          </div>
+          <div class="fp hidden" id="fp-new"></div>
+        </div>
+      </div>
+
+      <button class="btn-compare" id="btn-compare" onclick="startCompare()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+        Сравнить редакции
+      </button>
+
+      <!-- BACKEND: показывается во время polling GET /api/jobs/:jobId/status -->
+      <div class="progress-wrap hidden" id="progress-wrap">
+        <div class="progress-label" id="progress-label">Анализирую документы...</div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-steps" id="progress-steps">
+          <span class="ps active">Парсинг</span>
+          <span class="ps">Структура</span>
+          <span class="ps">Семантика</span>
+          <span class="ps">НПА РБ</span>
+          <span class="ps">Отчёт</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: COMPARE TABLE
+       BACKEND:
+         GET /api/compare/:jobId/table → Change[]
+         GET /api/compare/:jobId/summary → { red, orange, green }
+         GET /api/compare/:jobId/diff → { old: html, new: html }
+         GET /api/compare/:jobId/violations → Violation[]
+         GET /api/compare/:jobId/export?format=docx → stream
+       ══════════════════════ -->
+  <div class="page hidden" id="page-compare-table">
+    <div class="cmp-header">
+      <div>
+        <h1 class="cmp-title" id="cmp-title">Анализ изменений</h1>
+        <p class="cmp-sub" id="cmp-sub">Правила внутреннего трудового распорядка · 10 изменений</p>
+      </div>
+      <div class="cmp-header-actions">
+        <!-- BACKEND: GET /api/compare/:jobId/export?format=docx с гиперссылками на НЦПИ -->
+        <button class="btn-outline" onclick="exportDocx()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Экспорт .docx
+        </button>
+        <!-- BACKEND: открытие поиска по НЦПИ — GET /api/npa/search?query= (прокси на pravo.by) -->
+        <button class="btn-outline" onclick="openNtsiModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Поиск по НЦПИ
+        </button>
+      </div>
+    </div>
+
+    <div class="tabs-bar">
+      <button class="tab active" onclick="switchTab('table',this)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg>
+        Сравнение таблица
+      </button>
+      <button class="tab" onclick="switchTab('vtv',this)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="9" height="18" rx="1"/><rect x="13" y="3" width="9" height="18" rx="1"/></svg>
+        Сравнение vtv
+      </button>
+      <button class="tab" onclick="switchTab('check',this)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,11 12,14 22,4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Проверка с отчётом
+      </button>
+    </div>
+
+    <!-- TAB: TABLE -->
+    <div class="tab-pane" id="tab-table">
+      <div class="tbl-toolbar">
+        <div class="search-box sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <!-- BACKEND: клиентская фильтрация / GET /api/compare/:jobId/table?search= -->
+          <input class="search-input" type="text" placeholder="Фильтровать..." oninput="filterTable(this.value)" id="tbl-search"/>
+        </div>
+        <div class="filter-chips" id="tbl-risk-filter">
+          <button class="fchip active" onclick="filterTableRisk('all',this)">Все</button>
+          <button class="fchip" onclick="filterTableRisk('red',this)"><span class="rdot r"></span>Противоречие</button>
+          <button class="fchip" onclick="filterTableRisk('orange',this)"><span class="rdot o"></span>Проверить</button>
+          <button class="fchip" onclick="filterTableRisk('green',this)"><span class="rdot g"></span>Безопасно</button>
+        </div>
+        <button class="btn-outline" style="margin-left:auto" onclick="toggleTableDense()">Изменить вид</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="ctbl" id="ctbl">
+          <thead><tr>
+            <th style="width:36px">#</th>
+            <th>Раздел</th><th>Было</th><th>Стало</th>
+            <th class="sortable" onclick="sortTable('type')">Тип изменения <span class="si">↕</span></th>
+            <th class="sortable" onclick="sortTable('risk')">Риск <span class="si">↕</span></th>
+            <th>Закон</th><th>Рекомендация</th>
+            <th style="width:32px"></th>
+          </tr></thead>
+          <tbody id="ctbl-body"></tbody>
+        </table>
+      </div>
+      <div class="tbl-foot">
+        <span id="tbl-summary">3 высоких приоритета</span>
+        <div class="tbl-pg">
+          <span>Строк:</span>
+          <!-- BACKEND: смена значения → повторный запрос с &perPage= -->
+          <select class="pg-sel" onchange="setPerPage(+this.value)"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select>
+          <span id="tbl-pginfo">Стр. 1 / 1</span>
+          <button class="pg-b" onclick="tblPage(-1)">«</button>
+          <button class="pg-b" onclick="tblPage(-1)">‹</button>
+          <button class="pg-b" onclick="tblPage(1)">›</button>
+          <button class="pg-b" onclick="tblPage(1)">»</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: VTV -->
+    <div class="tab-pane hidden" id="tab-vtv">
+      <div class="vtv-wrap">
+        <div class="vtv-col">
+          <div class="vtv-col-hdr">
+            <span class="vtv-col-lbl">Старая редакция</span>
+            <!-- BACKEND: версия из API -->
+            <span class="vtv-col-ver">v1.0 · 12.02.2024</span>
+          </div>
+          <!-- BACKEND: HTML с <span class="vdel"> из GET /api/compare/:jobId/diff -->
+          <div class="vtv-body" id="vtv-old"></div>
+        </div>
+        <div class="vtv-divider"></div>
+        <div class="vtv-col">
+          <div class="vtv-col-hdr">
+            <span class="vtv-col-lbl">Новая редакция</span>
+            <span class="vtv-col-ver">v2.0 · 12.02.2025</span>
+          </div>
+          <!-- BACKEND: HTML с <span class="vadd"> -->
+          <div class="vtv-body" id="vtv-new"></div>
+        </div>
+      </div>
+      <!-- Панель деталей изменения (появляется при клике) -->
+      <!-- BACKEND: данные по changeId из массива Changes -->
+      <div class="vtv-bar hidden" id="vtv-bar">
+        <div class="vtv-bar-body">
+          <div class="vtv-bar-row">
+            <div><span class="vbl">Раздел</span><span class="vbv" id="vb-sec">П.2.4</span></div>
+            <div><span class="vbl">Тип изменения</span><span class="vbv" id="vb-type">Изменение обязанности</span></div>
+            <div><span class="vbl">Закон</span><span class="vbv" id="vb-law">ст.55 ТК РБ</span></div>
+          </div>
+          <div><span class="vbl">Рекомендация</span><span class="vbv" id="vb-rec">Проверить корректность</span></div>
+        </div>
+        <div class="vtv-bar-right">
+          <span class="bdg" id="vb-bdg">Противоречие</span>
+          <!-- BACKEND: ссылка на конкретную статью НЦПИ по lawId -->
+          <a class="vb-link" id="vb-link" href="https://pravo.by" target="_blank" rel="noopener">pravo.by ↗</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: CHECK -->
+    <div class="tab-pane hidden" id="tab-check">
+      <!-- BACKEND: цифры из GET /api/compare/:jobId/summary -->
+      <div class="chk-stats">
+        <div class="chk-card chk-r"><div class="chk-num" id="chk-red">3</div><div class="chk-lbl">Противоречия</div><div class="chk-desc">Требуют немедленного исправления</div></div>
+        <div class="chk-card chk-o"><div class="chk-num" id="chk-orange">4</div><div class="chk-lbl">Требуют проверки</div><div class="chk-desc">Рекомендуется проверить соответствие</div></div>
+        <div class="chk-card chk-g"><div class="chk-num" id="chk-green">3</div><div class="chk-lbl">Безопасно</div><div class="chk-desc">Не нарушают действующие НПА</div></div>
+      </div>
+
+      <!-- BACKEND: уровни можно хранить константой на фронте или GET /api/hierarchy -->
+      <h3 class="chk-section">Иерархия законодательства Республики Беларусь</h3>
+      <div class="hier-list" id="hier-list"></div>
+
+      <!-- BACKEND: GET /api/compare/:jobId/violations → Violation[] -->
+      <h3 class="chk-section" style="margin-top:28px">Выявленные нарушения и противоречия</h3>
+      <div class="viol-list" id="viol-list"></div>
+
+      <div class="chk-actions">
+        <!-- BACKEND: GET /api/compare/:jobId/export?format=docx -->
+        <button class="btn-dark" onclick="exportDocx()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Скачать отчёт .docx
+        </button>
+        <button class="btn-outline" onclick="openNtsi()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Открыть на НЦПИ
+        </button>
+        <!-- BACKEND: POST /api/compare/:jobId/share → { shareUrl } -->
+        <button class="btn-outline" onclick="shareReport()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          Поделиться
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: CHAIN — цепочка редакций
+       ТЗ: "Поддержка сравнения «цепочек» редакций (>2 версий) для анализа эволюции акта"
+       BACKEND: GET /api/acts/:id/chain → { versions: Version[], chartData: ChartPoint[] }
+       ══════════════════════ -->
+  <div class="page hidden" id="page-chain">
+    <div class="page-topnav">
+      <button class="topnav-btn" onclick="showPage('acts')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15,18 9,12 15,6"/></svg>
+        Назад к актам
+      </button>
+    </div>
+    <div class="chain-header">
+      <div>
+        <h1 class="chain-title">Цепочка редакций</h1>
+        <p class="chain-sub" id="chain-sub">Правила внутреннего трудового распорядка · ООО «ТехПром» · 5 версий · 14 месяцев</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-outline" onclick="exportDocx()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Экспорт истории
+        </button>
+        <button class="btn-dark" onclick="showPage('compare-table')">Сравнить любые две версии</button>
+      </div>
+    </div>
+
+    <!-- Статистика цепочки -->
+    <div class="chain-stats">
+      <div class="cstat"><span class="cstat-n">5</span><span class="cstat-l">версий</span></div>
+      <div class="cstat"><span class="cstat-n">14 мес</span><span class="cstat-l">охвачено</span></div>
+      <div class="cstat cstat-r"><span class="cstat-n">6</span><span class="cstat-l">нарушений</span></div>
+      <div class="cstat cstat-o"><span class="cstat-n">9</span><span class="cstat-l">на проверку</span></div>
+      <div class="cstat cstat-g"><span class="cstat-n">12</span><span class="cstat-l">безопасно</span></div>
+    </div>
+
+    <div class="chain-body">
+      <!-- Timeline версий -->
+      <div class="chain-timeline-col">
+        <h3 class="chain-col-title">История версий</h3>
+        <!-- BACKEND: генерируется из GET /api/acts/:id/chain -->
+        <div class="chain-timeline" id="chain-timeline"></div>
+      </div>
+      <!-- График рисков -->
+      <div class="chain-chart-col">
+        <h3 class="chain-col-title">Динамика рисков по версиям</h3>
+        <!-- BACKEND: данные из chartData поля ответа /chain -->
+        <svg class="chain-svg" id="chain-svg" viewBox="0 0 400 180" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="chain-legend">
+          <span><span class="rdot r"></span>Противоречия</span>
+          <span><span class="rdot o"></span>Проверить</span>
+          <span><span class="rdot g"></span>Безопасно</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: ASSISTANT
+       BACKEND:
+         POST /api/chat { messages, context? } → SSE stream
+         GET  /api/chats → Chat[]
+         POST /api/chats → { chatId }
+       ══════════════════════ -->
+  <div class="page hidden" id="page-assistant">
+    <div class="ass-layout">
+      <div class="ass-sidebar">
+        <!-- BACKEND: POST /api/chats → создать новый чат -->
+        <button class="btn-dark btn-sm" onclick="newChat()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Новый чат
+        </button>
+        <!-- BACKEND: GET /api/chats → Chat[] (история) -->
+        <div class="ass-hist-section">Недавние</div>
+        <a class="ass-hist-item active" href="#" onclick="return false;">Анализ ПИТР v2</a>
+        <a class="ass-hist-item" href="#" onclick="return false;">Проверка ст.45 Закона</a>
+        <a class="ass-hist-item" href="#" onclick="return false;">Сравнение НК РБ 2024</a>
+        <a class="ass-hist-item" href="#" onclick="return false;">Декрет №4 изменения</a>
+        <a class="ass-hist-item" href="#" onclick="return false;">ТК РБ ст.73 анализ</a>
+      </div>
+
+      <div class="ass-main">
+        <div class="ass-msgs" id="ass-msgs">
+          <div class="ass-welcome" id="ass-welcome">
+            <div class="ass-wlc-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.44-4.14"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.44-4.14"/></svg>
+            </div>
+            <h2>LexDiff Ассистент</h2>
+            <p>Задайте вопрос о загруженных актах, попросите объяснить изменение или проверить соответствие законодательству Республики Беларусь</p>
+            <div class="suggestions">
+              <button class="sug" onclick="sugSend(this)">Объясни изменение в п.2.4</button>
+              <button class="sug" onclick="sugSend(this)">Какие риски в новой редакции?</button>
+              <button class="sug" onclick="sugSend(this)">Найди противоречия с ТК РБ</button>
+              <button class="sug" onclick="sugSend(this)">Сформируй юридическое заключение</button>
+              <button class="sug" onclick="sugSend(this)">Проверь соответствие Конституции РБ</button>
+              <button class="sug" onclick="sugSend(this)">Проанализируй цепочку редакций</button>
+            </div>
+          </div>
+          <div class="chat-msgs hidden" id="chat-msgs"></div>
+        </div>
+        <div class="ass-input-bar">
+          <div class="ass-input-meta">
+            <button class="ass-chip" onclick="selectAct()">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              Выбрать проект
+            </button>
+            <button class="ass-chip">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              Все ресурсы
+            </button>
+          </div>
+          <div class="ass-input-box">
+            <!-- BACKEND: Enter → POST /api/chat с SSE-стримом токенов -->
+            <textarea class="ass-ta" id="ass-ta" placeholder="Спросите, найдите или создайте что-нибудь..." rows="1" onkeydown="assKey(event)" oninput="assResize(this)"></textarea>
+            <button class="ass-send" onclick="assSend()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19,12 12,5 5,12"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       PAGE: EMPTY STATE
+       ══════════════════════ -->
+  <div class="page hidden" id="page-empty">
+    <div class="empty-wrap">
+      <div class="empty-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+      </div>
+      <h2 class="empty-title">Пока нет нормативных актов</h2>
+      <p class="empty-sub">Загрузите первую пару документов — AI выявит изменения, проверит соответствие законодательству РБ и сформирует отчёт</p>
+      <button class="btn-dark" style="margin-bottom:36px" onclick="showPage('upload')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+        Загрузить первый акт
+      </button>
+      <div class="empty-features">
+        <div class="ef"><div class="ef-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><div><div class="ef-title">Семантический анализ</div><div class="ef-desc">«имеет право» → «обязан» — находим юридически значимые изменения</div></div></div>
+        <div class="ef"><div class="ef-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><div class="ef-title">Иерархия НПА (10 уровней)</div><div class="ef-desc">От Конституции до технических НПА Республики Беларусь</div></div></div>
+        <div class="ef"><div class="ef-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/></svg></div><div><div class="ef-title">Экспорт .docx + НЦПИ</div><div class="ef-desc">Отчёт с гиперссылками на pravo.by для каждого нарушения</div></div></div>
+        <div class="ef"><div class="ef-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></div><div><div class="ef-title">Цепочка редакций</div><div class="ef-desc">Анализ эволюции акта через все версии с timeline и графиком рисков</div></div></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ─── КОНТЕКСТНОЕ МЕНЮ ─── -->
+<div class="ctx-menu hidden" id="ctx-menu">
+  <button class="ctx-item" onclick="ctxAction('view')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Открыть</button>
+  <button class="ctx-item" onclick="ctxAction('compare')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="9" height="18" rx="1"/><rect x="13" y="3" width="9" height="18" rx="1"/></svg>Сравнить</button>
+  <button class="ctx-item" onclick="ctxAction('chain')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>Цепочка</button>
+  <button class="ctx-item" onclick="ctxAction('export')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/></svg>Экспорт</button>
+  <div class="ctx-divider"></div>
+  <!-- BACKEND: DELETE /api/acts/:id -->
+  <button class="ctx-item ctx-danger" onclick="ctxAction('delete')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Удалить</button>
+</div>
+
+<!-- ─── TOAST ─── -->
+<div class="toast hidden" id="toast"></div>
+
+<!-- ─── MODAL: Удаление ─── -->
+<div class="modal-overlay hidden" id="modal-del" onclick="closeModal('modal-del')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="modal-title">Удалить акт?</h3>
+      <button class="modal-close" onclick="closeModal('modal-del')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <p class="modal-text" id="modal-del-text">Это действие необратимо. Все версии и результаты анализа будут удалены.</p>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal('modal-del')">Отмена</button>
+      <button class="btn-danger" onclick="confirmDelete()">Удалить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODAL: Поиск по НЦПИ ─── -->
+<!-- BACKEND: /api/npa/search?query=&type= — прокси к pravo.by API -->
+<div class="modal-overlay hidden" id="modal-ntsi" onclick="closeModal('modal-ntsi')">
+  <div class="modal modal-wide" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="modal-title">Поиск по НЦПИ</h3>
+      <button class="modal-close" onclick="closeModal('modal-ntsi')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <p class="modal-sub">Национальный правовой интернет-портал Республики Беларусь (pravo.by)</p>
+    <div class="search-box" style="margin-bottom:10px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="search-input" id="ntsi-q" type="text" placeholder="Номер закона, статья, тема..." onkeydown="if(event.key==='Enter')ntsiSearch()"/>
+    </div>
+    <div class="filter-chips" style="margin-bottom:14px">
+      <button class="fchip active" id="ntsi-f-all" onclick="ntsiType('all',this)">Все</button>
+      <button class="fchip" onclick="ntsiType('law',this)">Законы</button>
+      <button class="fchip" onclick="ntsiType('decree',this)">Декреты / Указы</button>
+      <button class="fchip" onclick="ntsiType('post',this)">Постановления</button>
+      <button class="fchip" onclick="ntsiType('code',this)">Кодексы</button>
+    </div>
+    <button class="btn-dark" style="width:100%;margin-bottom:16px" onclick="ntsiSearch()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Искать на НЦПИ
+    </button>
+    <div class="ntsi-quick">
+      <p class="ntsi-quick-title">Часто используемые акты</p>
+      <a class="ntsi-link" href="https://pravo.by/document/?guid=3871&p0=hk9900296" target="_blank" rel="noopener">ТК РБ — Трудовой кодекс</a>
+      <a class="ntsi-link" href="https://pravo.by" target="_blank" rel="noopener">НК РБ — Налоговый кодекс</a>
+      <a class="ntsi-link" href="https://pravo.by" target="_blank" rel="noopener">Конституция Республики Беларусь</a>
+      <a class="ntsi-link" href="https://pravo.by" target="_blank" rel="noopener">Закон №130-З о нормотворчестве</a>
+      <a class="ntsi-link" href="https://pravo.by" target="_blank" rel="noopener">Закон об архивном деле</a>
+      <a class="ntsi-link" href="https://pravo.by" target="_blank" rel="noopener">Закон об электронном документе</a>
+    </div>
+    <!-- BACKEND: результаты здесь после GET /api/npa/search -->
+    <div id="ntsi-results" class="ntsi-results hidden"></div>
+  </div>
+</div>
+
+<!-- ─── MODAL: Горячие клавиши ─── -->
+<div class="modal-overlay hidden" id="modal-shortcuts" onclick="closeModal('modal-shortcuts')">
+  <div class="modal modal-kbd" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="modal-title">Горячие клавиши</h3>
+      <button class="modal-close" onclick="closeModal('modal-shortcuts')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="sc-cols">
+      <div>
+        <div class="sc-group">Навигация</div>
+        <div class="sc-row"><span>Список актов</span><div class="sc-keys"><kbd>G</kbd><kbd>A</kbd></div></div>
+        <div class="sc-row"><span>Загрузить акты</span><div class="sc-keys"><kbd>G</kbd><kbd>U</kbd></div></div>
+        <div class="sc-row"><span>Ассистент</span><div class="sc-keys"><kbd>G</kbd><kbd>I</kbd></div></div>
+        <div class="sc-row"><span>Цепочка</span><div class="sc-keys"><kbd>G</kbd><kbd>C</kbd></div></div>
+        <div class="sc-group" style="margin-top:14px">Интерфейс</div>
+        <div class="sc-row"><span>Переключить вид</span><div class="sc-keys"><kbd>V</kbd></div></div>
+        <div class="sc-row"><span>Это окно</span><div class="sc-keys"><kbd>?</kbd></div></div>
+        <div class="sc-row"><span>Закрыть</span><div class="sc-keys"><kbd>Esc</kbd></div></div>
+      </div>
+      <div>
+        <div class="sc-group">Действия</div>
+        <div class="sc-row"><span>Новое сравнение</span><div class="sc-keys"><kbd>N</kbd></div></div>
+        <div class="sc-row"><span>Поиск по НЦПИ</span><div class="sc-keys"><kbd>Ctrl</kbd><kbd>K</kbd></div></div>
+        <div class="sc-row"><span>Экспорт .docx</span><div class="sc-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
+        <div class="sc-row"><span>Поиск</span><div class="sc-keys"><kbd>/</kbd></div></div>
+        <div class="sc-group" style="margin-top:14px">В таблице</div>
+        <div class="sc-row"><span>Все / Красные</span><div class="sc-keys"><kbd>1</kbd> / <kbd>2</kbd></div></div>
+        <div class="sc-row"><span>Оранжевые / Зелёные</span><div class="sc-keys"><kbd>3</kbd> / <kbd>4</kbd></div></div>
+        <div class="sc-row"><span>Плотный вид</span><div class="sc-keys"><kbd>D</kbd></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
