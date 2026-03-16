@@ -2,35 +2,33 @@
 
 ## AI HACKATHON: BSUIR 2026
 
-- [Сайт хакатона](https://science.bsuir.by/ru/aihackathon)
-- [Техническое задание](docs/tech-spec.pdf)
-- [Конфа хакатона](https://t.me/AIhackathon2026)
+* [Hackathon Website](https://science.bsuir.by/ru/aihackathon)
+* [Technical Specification](docs/tech-spec.pdf)
+* [Hackathon Conference](https://t.me/AIhackathon2026)
+* [Pravo.by](https://pravo.by)
+* [Center of Evil Knowledge](https://etalonline.by)
 
-- [право бай](https://pravo.by)
-- [центр усия зла](https://etalonline.by)
+## Repo Structure
 
-## Структура репы
+* `web/` :: Frontend project
+* `api/` :: Backend project
+* `docs/` :: Documentation
+* `data/` :: Directory for temporary files processed by the backend
+* `nix/` :: Additional files for deployment via Nix
 
-- web/ :: Проект фронтенда
-- api/ :: Проект бекенда
-- docs/ :: Документация
+## Frontend
 
-- data/ :: Каталог для временного содержания файлов для обработки беком
-- nix/ :: Допфайлы для деплоя через nix
+* [Wireframes](https://www.figma.com/design/NCEooihRKXrlnse23hOlpS/OpenSource-shadcn-ui---kit-for-Figma--Community-?node-id=4711-5431&p=f&t=j41T6mMjGfhellYa-0)
 
-## Фронтенд
+Stack:
 
-- [Вейрфреймы](https://www.figma.com/design/NCEooihRKXrlnse23hOlpS/OpenSource-shadcn-ui---kit-for-Figma--Community-?node-id=4711-5431&p=f&t=j41T6mMjGfhellYa-0)
+* Vue.js
+* ???
 
-Стек:
+### Backend
 
-- Vue.js
-- ???
+Stack:
 
-### Бекенд
-
-Стек:
-
-- Go
-- Echo
-- Python 3
+* Go
+* Echo
+* Python 3

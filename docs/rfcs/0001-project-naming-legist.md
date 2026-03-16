@@ -6,8 +6,7 @@ co-authors:
   [
     "Naurasiuk Matvei",
     "Sarachuk Daniil",
-    "Lisovitskiy Bogdan",
-    "Sikorski Artsiom",
+    "Lisovitskiy Bogdan"
   ]
 status: accepted
 related-issues: []
