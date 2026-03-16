@@ -1,18 +1,20 @@
 {
   mkShell,
   go,
-  gopls,
-  gotools,
   delve,
   golangci-lint,
+  gomod2nix,
+  gopls,
+  gotools,
 }:
 mkShell {
   packages = [
     go
-    gopls
-    gotools
     delve
     golangci-lint
+    gomod2nix
+    gopls
+    gotools
   ];
 
   GOPATH = "${toString ./.}/.go";

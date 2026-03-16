@@ -11,6 +11,11 @@
       url = "https://codeberg.org/api/v1/repos/nadevko/kasumi/archive/cc0a6826be2c4c4c6a419d7b420980b5d58bebca.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -18,6 +23,7 @@
       self,
       nixpkgs,
       kasumi,
+      gomod2nix,
     }:
     let
       so = self.overlays;
@@ -35,6 +41,7 @@
         environment = k.foldLay [
           ko.compat
           ko.default
+          gomod2nix.overlays.default
           so.augment
         ];
       };
