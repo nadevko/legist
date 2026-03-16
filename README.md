@@ -1,4 +1,6 @@
-# AI HACKATHON: BSUIR 2026
+# legist
+
+## AI HACKATHON: BSUIR 2026
 
 - [Сайт хакатона](https://science.bsuir.by/ru/aihackathon)
 - [Техническое задание](docs/tech-spec.pdf)

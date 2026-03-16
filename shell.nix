@@ -24,4 +24,6 @@ mkShell {
     export PATH="$GOPATH/bin:$PATH"
     echo "Go environment is ready. Go version: $(go version)"
   '';
+
+  templates.rfc = ./docs/rfcs/0000-template.md;
 }
