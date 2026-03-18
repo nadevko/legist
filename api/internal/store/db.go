@@ -26,6 +26,45 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_token_hash ON sessions(token_hash);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL,
+	expires_at DATETIME NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS files (
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	name       TEXT NOT NULL,
+	mime_type  TEXT NOT NULL,
+	size       INTEGER NOT NULL,
+	path       TEXT NOT NULL,
+	status     TEXT NOT NULL DEFAULT 'pending',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	type       TEXT NOT NULL,
+	status     TEXT NOT NULL DEFAULT 'pending',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	expires_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_files (
+	job_id  TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+	file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+	status  TEXT NOT NULL DEFAULT 'pending',
+	error   TEXT,
+	PRIMARY KEY (job_id, file_id)
+);
+
+CREATE INDEX IF NOT EXISTS files_user_id ON files(user_id);
+CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs(user_id);
 `
 
 func Open(path string) (*sqlx.DB, error) {

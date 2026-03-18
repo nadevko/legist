@@ -5,6 +5,7 @@ import "os"
 type Config struct {
 	Addr      string
 	DBPath    string
+	DataPath  string
 	JWTSecret string
 	Dev       bool
 
@@ -26,6 +27,7 @@ func Load() *Config {
 	return &Config{
 		Addr:      getEnv("ADDR", ":8080"),
 		DBPath:    getEnv("DB_PATH", "legist.db"),
+		DataPath:  getEnv("DATA_PATH", "../data"),
 		JWTSecret: getEnv("JWT_SECRET", "change-me-in-prod"),
 		Dev:       getEnv("ENV", "dev") == "dev",
 

@@ -42,10 +42,6 @@ type userResponse struct {
 	Email string `json:"email"`
 }
 
-type errorResponse struct {
-	Message string `json:"message"`
-}
-
 // handleRegister godoc
 // @Summary     Register a new user
 // @Tags        auth
@@ -55,6 +51,7 @@ type errorResponse struct {
 // @Success     201 {object} userResponse
 // @Failure     400 {object} errorResponse
 // @Failure     409 {object} errorResponse
+// @Failure     500 {object} errorResponse
 // @Router      /users [post]
 func (s *Server) handleRegister(c echo.Context) error {
 	var body registerRequest
@@ -84,6 +81,7 @@ func (s *Server) handleRegister(c echo.Context) error {
 // @Success     200 {object} tokenResponse
 // @Failure     400 {object} errorResponse
 // @Failure     401 {object} errorResponse
+// @Failure     500 {object} errorResponse
 // @Router      /sessions [post]
 func (s *Server) handleLogin(c echo.Context) error {
 	var body loginRequest
@@ -131,7 +129,8 @@ func (s *Server) handleLogin(c echo.Context) error {
 // @Success     200 {object} tokenResponse
 // @Failure     400 {object} errorResponse
 // @Failure     401 {object} errorResponse
-// @Router      /tokens [post]
+// @Failure     500 {object} errorResponse
+// @Router      /tokens/refresh [post]
 func (s *Server) handleRefresh(c echo.Context) error {
 	var body refreshRequest
 	if err := c.Bind(&body); err != nil || body.RefreshToken == "" {
@@ -158,6 +157,7 @@ func (s *Server) handleRefresh(c echo.Context) error {
 // @Security    BearerAuth
 // @Success     204
 // @Failure     401 {object} errorResponse
+// @Failure     500 {object} errorResponse
 // @Router      /sessions [delete]
 func (s *Server) handleLogout(c echo.Context) error {
 	if err := s.sessions.Delete(auth.UserID(c)); err != nil {
@@ -174,6 +174,7 @@ func (s *Server) handleLogout(c echo.Context) error {
 // @Success     200 {object} userResponse
 // @Failure     401 {object} errorResponse
 // @Failure     404 {object} errorResponse
+// @Failure     500 {object} errorResponse
 // @Router      /me [get]
 func (s *Server) handleMe(c echo.Context) error {
 	u, err := s.users.GetByID(auth.UserID(c))
