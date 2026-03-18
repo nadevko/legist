@@ -31,6 +31,20 @@
       ko = kasumi.overlays;
     in
     {
+apps = k.forAllPkgs self { } (pkgs: {
+        swagen = {
+          type = "app";
+          program =
+            toString
+            <| pkgs.writeScript "swagen" ''
+              #!/usr/bin/env bash
+              swag init -g doc.go -d ./internal/api -o docs
+              mv docs/swagger.json docs/v1-alpha.json
+              rm -f docs/swagger.yaml docs/doc.json
+            '';
+        };
+      });
+
       nixosModules = k.collapseNixDir ./nix/nixos;
       homeModules = k.collapseNixDir ./nix/home;
 
@@ -66,5 +80,6 @@
       });
 
       formatter = k.forAllPkgs self { } <| builtins.getAttr "kasumi-fmt";
+      templates.rfc.path = ./docs/rfcs/0000-template.md;
     };
 }
