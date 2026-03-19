@@ -19,12 +19,14 @@ export function ActDetailPage() {
   const [selected, setSelected] = useState<Version | null>(null)
   const [versionFilter, setVersionFilter] = useState<'Все' | 'Актуальные' | 'Архив'>('Все')
   const [verSearch, setVerSearch] = useState('')
+  const [loading, setLoading] = useState(false)
   const progress = useCompareProgress()
 
   useEffect(() => {
     const fetchFiles = async () => {
+      setLoading(true)
       const token = localStorage.getItem('legist_token')
-      if (!token) return
+      if (!token) { setLoading(false); return }
       try {
         const res = await fetch('/api/files', {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -60,7 +62,7 @@ export function ActDetailPage() {
     return r
   }, [rows, versionFilter, verSearch])
 
-  const act = ACTS_DATA.find(a => a.id === Number(id)) || { title: 'Документ', org: '—', versions: rows.length }
+  const currentAct = rows.length > 0 ? { title: rows[0].author === 'Вы' ? 'Загруженный документ' : 'Документ', org: 'Мои документы' } : { title: 'Документ', org: '—' }
   const checked = rows.filter(v => v.checked)
 
   const toggleRow = (num: number) => setRows(rs => rs.map(r => r.num === num ? { ...r, checked: !r.checked } : r))
@@ -97,7 +99,7 @@ export function ActDetailPage() {
   const startCompare = () => {
     if (checked.length !== 2) { showToast('⚠ Выберите ровно 2 версии для сравнения'); return }
     const [a, b] = [...checked].sort((x, y) => x.num - y.num)
-    setCompare('Анализ изменений', (act?.title || 'Документ') + ' · Версия ' + a.num + ' → Версия ' + b.num + ' · ' + a.date + ' vs ' + b.date)
+    setCompare('Анализ изменений', (currentAct?.title || 'Документ') + ' · Версия ' + a.num + ' → Версия ' + b.num + ' · ' + a.date + ' vs ' + b.date)
     progress.start(id || 'temp', () => {
       setRows(rs => rs.map(r => ({ ...r, checked: false })))
       navigate('/compare/1')
@@ -111,7 +113,7 @@ export function ActDetailPage() {
     green: changeRows.filter(r => r.risk === 'green').length,
   }), [changeRows])
 
-  if (!act) return <div className="page" style={{ padding: 32 }}>Акт не найден</div>
+  if (loading && rows.length === 0) return <div className="page" style={{ padding: 32, textAlign: 'center' }}>Загрузка акта...</div>
 
   return (
     <div className="page">
@@ -123,8 +125,8 @@ export function ActDetailPage() {
       </div>
       <div className="detail-header">
         <div>
-          <h1 className="detail-title">{act.title}</h1>
-          <p className="detail-sub">{act.org} · {act.versions} версий</p>
+          <h1 className="detail-title">{currentAct.title}</h1>
+          <p className="detail-sub">{currentAct.org} · {rows.length} {pl(rows.length, 'версия', 'версии', 'версий')}</p>
         </div>
         <div className="detail-header-actions">
           <button className="btn-dark" onClick={() => navigate('/compare/1')}>

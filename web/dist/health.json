@@ -1,0 +1,6 @@
+{
+  "status": "ok",
+  "service": "legist-web",
+  "version": "1.0.0",
+  "timestamp": "${new Date().toISOString()}"
+}

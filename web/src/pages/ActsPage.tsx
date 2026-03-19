@@ -1,9 +1,8 @@
 // ─────────────────────────────────────────────────────────
 // ACTS PAGE
 // ─────────────────────────────────────────────────────────
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ACTS_DATA } from '../data'
 import { useUIStore } from '../store'
 import { pl, rBdg, rFull } from '../utils/helpers'
 
@@ -14,23 +13,58 @@ export function ActsPage() {
   const [typeFilter, setTypeFilter] = useState<'all'|'ЛНА'|'НПА'>('all')
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const [acts, setActs] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout>|null>(null)
+
+  useEffect(() => {
+    const fetchActs = async () => {
+      setLoading(true)
+      const token = localStorage.getItem('legist_token')
+      if (!token) { setLoading(false); return }
+      try {
+        const res = await fetch('/api/files', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.object === 'list') {
+            setActs(data.data.map((f: any) => ({
+              id: f.id,
+              type: 'ЛНА', // Бэкенд пока не хранит тип, ставим по умолчанию
+              title: f.filename || 'Без названия',
+              org: 'Мои документы',
+              versions: 1, // В текущей модели бэкенда 1 файл = 1 версия
+              date: new Date(f.created * 1000).toLocaleDateString('ru-RU'),
+              updatedBy: 'Вы'
+            })))
+          }
+        }
+      } catch (err) {
+        console.error('Fetch acts error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchActs()
+  }, [])
+
   const handleSearch = useCallback((val: string) => {
     setSearchInput(val)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => setSearch(val), 200)
   }, [])
-  const [ctxMenu, setCtxMenu] = useState<{x:number;y:number;id:number}|null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{x:number;y:number;id:string}|null>(null)
 
   const filtered = useMemo(() => {
-    let f = ACTS_DATA
+    let f = acts
     if (typeFilter !== 'all') f = f.filter(a => a.type === typeFilter)
     const q = search.trim().toLowerCase()
     if (q) f = f.filter(a => a.title.toLowerCase().includes(q) || a.org.toLowerCase().includes(q))
     return f
-  }, [typeFilter, search])
+  }, [acts, typeFilter, search])
 
-  const showCtx = (e: React.MouseEvent, id: number) => {
+  const showCtx = (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
     setCtxMenu({ x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 180), id })
   }
