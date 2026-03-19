@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '../../store'
 import { ACTS_DATA } from '../../data'
@@ -7,8 +8,32 @@ interface Props { mobOpen?: boolean; onClose?: () => void }
 export default function Sidebar({ mobOpen, onClose }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { currentUser, logout } = useAuthStore()
+  const { currentUser, logout, isAuthenticated } = useAuthStore()
   const setModalShortcuts = useUIStore(s => s.setModalShortcuts)
+  const [fileCount, setFileCount] = useState(0)
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const fetchCount = async () => {
+      const token = localStorage.getItem('legist_token')
+      if (!token) return
+      try {
+        const res = await fetch('/api/files', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.object === 'list') setFileCount(data.data.length)
+        }
+      } catch (err) {
+        console.error('Sidebar fetch error:', err)
+      }
+    }
+    fetchCount()
+    // Обновляем раз в 30 секунд для актуальности
+    const iv = setInterval(fetchCount, 30000)
+    return () => clearInterval(iv)
+  }, [isAuthenticated])
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
@@ -37,7 +62,7 @@ export default function Sidebar({ mobOpen, onClose }: Props) {
       {/* Nav */}
       <nav className="sb-nav">
         <button className={`sb-link${isActive('/acts') ? ' active' : ''}`} onClick={() => go('/acts')}>
-          Акты <span className="sb-badge">{ACTS_DATA.length}</span>
+          Акты <span className="sb-badge">{fileCount || 0}</span>
         </button>
         <button className={`sb-link${location.pathname === '/' ? ' active' : ''}`} onClick={() => go('/')}>
           Загрузить акты

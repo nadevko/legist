@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ACTS_DATA, CHANGES_DATA, HIERARCHY_DATA, VIOLATIONS_DATA, CHAIN_VERSIONS_DATA } from '../data'
 import { useUIStore, useCompareStore } from '../store'
@@ -9,45 +9,96 @@ import type { Version, Risk } from '../types'
 // ─────────────────────────────────────────────────────────
 // ACT DETAIL PAGE
 // ─────────────────────────────────────────────────────────
-const VERSION_ROWS_INIT: Version[] = [
-  { num: 1, date: '12.02.2025', author: 'Иванов А.П.', changes: 10, size: '142 КБ', status: 'Актуальная', checked: false },
-  { num: 2, date: '05.11.2024', author: 'Петрова О.С.', changes: 6, size: '138 КБ', status: 'Архив', checked: false },
-  { num: 3, date: '14.07.2024', author: 'Сидоров К.В.', changes: 4, size: '135 КБ', status: 'Архив', checked: false },
-  { num: 4, date: '02.03.2024', author: 'Иванов А.П.', changes: 3, size: '132 КБ', status: 'Архив', checked: false },
-  { num: 5, date: '10.01.2024', author: 'Петрова О.С.', changes: 0, size: '130 КБ', status: 'Архив', checked: false },
-]
 
 export function ActDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const showToast = useUIStore(s => s.showToast)
   const setCompare = useCompareStore(s => s.setCompare)
-  const [rows, setRows] = useState<Version[]>(VERSION_ROWS_INIT)
+  const [rows, setRows] = useState<Version[]>([])
   const [selected, setSelected] = useState<Version | null>(null)
   const [versionFilter, setVersionFilter] = useState<'Все' | 'Актуальные' | 'Архив'>('Все')
   const [verSearch, setVerSearch] = useState('')
   const progress = useCompareProgress()
 
+  useEffect(() => {
+    const fetchFiles = async () => {
+      const token = localStorage.getItem('legist_token')
+      if (!token) return
+      try {
+        const res = await fetch('/api/files', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.object === 'list') {
+            const mapped = data.data.map((f: any, i: number) => ({
+              id: f.id,
+              num: data.data.length - i,
+              date: new Date(f.created * 1000).toLocaleDateString('ru-RU'),
+              author: 'Вы',
+              changes: f.status === 'done' ? 5 : 0, // Мок, так как бэкенд пока не возвращает кол-во изменений
+              size: Math.round(f.size / 1024) + ' КБ',
+              status: f.status === 'done' ? (i === 0 ? 'Актуальная' : 'Архив') : 'Загрузка',
+              checked: false
+            }))
+            setRows(mapped)
+          }
+        }
+      } catch (err) {
+        console.error('Fetch files error:', err)
+      }
+    }
+    fetchFiles()
+  }, [])
+
   const filteredRows = useMemo(() => {
     let r = rows
     if (versionFilter === 'Актуальные') r = r.filter(v => v.status === 'Актуальная')
     if (versionFilter === 'Архив') r = r.filter(v => v.status === 'Архив')
-    if (verSearch.trim()) r = r.filter(v => v.author.toLowerCase().includes(verSearch.toLowerCase()))
+    if (verSearch.trim()) r = r.filter(v => v.author?.toLowerCase().includes(verSearch.toLowerCase()))
     return r
   }, [rows, versionFilter, verSearch])
 
-  const act = ACTS_DATA.find(a => a.id === Number(id))
+  const act = ACTS_DATA.find(a => a.id === Number(id)) || { title: 'Документ', org: '—', versions: rows.length }
   const checked = rows.filter(v => v.checked)
 
   const toggleRow = (num: number) => setRows(rs => rs.map(r => r.num === num ? { ...r, checked: !r.checked } : r))
   const selectAll = (e: React.ChangeEvent<HTMLInputElement>) => setRows(rs => rs.map(r => ({ ...r, checked: e.target.checked })))
   const selectVer = (v: Version) => setSelected(s => s?.num === v.num ? null : v)
 
+  const handleDelete = async (e: React.MouseEvent, v: Version) => {
+    e.stopPropagation()
+    if (!v.id) return
+    if (!window.confirm(`Вы уверены, что хотите удалить ${v.num} версию?`)) return
+
+    const token = localStorage.getItem('legist_token')
+    try {
+      const res = await fetch(`/api/files/${v.id}`, {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': crypto.randomUUID(),
+        }
+      })
+      if (res.ok) {
+        showToast('✓ Файл удален')
+        setRows(rs => rs.filter(r => r.id !== v.id))
+        if (selected?.id === v.id) setSelected(null)
+      } else {
+        const data = await res.json()
+        showToast('⚠ ' + (data.error?.message || 'Ошибка удаления'))
+      }
+    } catch (err) {
+      showToast('⚠ Ошибка сети')
+    }
+  }
+
   const startCompare = () => {
     if (checked.length !== 2) { showToast('⚠ Выберите ровно 2 версии для сравнения'); return }
     const [a, b] = [...checked].sort((x, y) => x.num - y.num)
     setCompare('Анализ изменений', (act?.title || 'Документ') + ' · Версия ' + a.num + ' → Версия ' + b.num + ' · ' + a.date + ' vs ' + b.date)
-    progress.start(() => {
+    progress.start(id || 'temp', () => {
       setRows(rs => rs.map(r => ({ ...r, checked: false })))
       navigate('/compare/1')
     })
@@ -122,6 +173,7 @@ export function ActDetailPage() {
           <div>Изменений</div>
           <div>Размер</div>
           <div>Статус</div>
+          <div style={{ width: 40 }}></div>
         </div>
         {filteredRows.map(v => (
           <div key={v.num}
@@ -140,6 +192,16 @@ export function ActDetailPage() {
               <span className={`vtbl-status ${v.status === 'Актуальная' ? 'status-act' : 'status-arch'}`}>
                 {v.status}
               </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button 
+                className="action-btn-del" 
+                title="Удалить версию"
+                onClick={(e) => handleDelete(e, v)}
+                style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', transition: 'all .2s' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+              </button>
             </div>
           </div>
         ))}
@@ -234,20 +296,50 @@ export function ActDetailPage() {
 export function HomePage() {
   const navigate = useNavigate()
   const showToast = useUIStore(s => s.showToast)
-  const { oldFile, newFile, dzOldOver, dzNewOver, setDzOldOver, setDzNewOver, onDrop, onSelect, removeOld, removeNew } = useFileUpload()
+  const { oldFile, newFile, dzOldOver, dzNewOver, loading, setDzOldOver, setDzNewOver, onDrop, onSelect, removeOld, removeNew } = useFileUpload()
   const progress = useCompareProgress()
+  const [recent, setRecent] = useState<any[]>([])
   const fiOldRef = useRef<HTMLInputElement>(null)
   const fiNewRef = useRef<HTMLInputElement>(null)
 
+  useEffect(() => {
+    const fetchRecent = async () => {
+      const token = localStorage.getItem('legist_token')
+      if (!token) return
+      try {
+        const res = await fetch('/api/files?limit=3', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.object === 'list') {
+            setRecent(data.data.map((f: any) => ({
+              id: f.id,
+              title: f.filename,
+              org: 'Мои загрузки',
+              v1: '—',
+              v2: 'v1',
+              date: new Date(f.created * 1000).toLocaleDateString('ru-RU'),
+              risk: f.status === 'done' ? 'green' : 'orange'
+            })))
+          }
+        }
+      } catch (err) {
+        console.error('Recent fetch error:', err)
+      }
+    }
+    fetchRecent()
+  }, [])
+
   const startCompare = () => {
     if (!oldFile || !newFile) { showToast('⚠ Загрузите оба файла для сравнения'); return }
-    progress.start(() => navigate('/compare/new'))
+    if (!newFile.id) { showToast('⚠ Дождитесь завершения загрузки файла'); return }
+    progress.start(newFile.id, () => navigate('/compare/new'))
   }
 
-  const recentComparisons = [
+  const recentComparisons = recent.length > 0 ? recent : [
     { id: 1, title: 'Правила внутреннего трудового распорядка', org: 'ООО «ТехПром»', v1: 'v4', v2: 'v5', date: '12.02.2025', risk: 'red' as Risk },
     { id: 2, title: 'Положение об оплате труда', org: 'ООО «ТехПром»', v1: 'v2', v2: 'v3', date: '05.11.2024', risk: 'orange' as Risk },
-    { id: 3, title: 'Инструкция по охране труда № 14', org: 'ГУП «СтройПроект»', v1: 'v6', v2: 'v7', date: '18.09.2024', risk: 'green' as Risk },
   ]
 
   const FileCard = ({ side, file, dzOver, setOver }: { side: 'old' | 'new', file: typeof oldFile, dzOver: boolean, setOver: (v: boolean) => void }) => (

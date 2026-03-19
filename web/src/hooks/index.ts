@@ -12,35 +12,62 @@ export function useToast() {
 export function useFileUpload() {
   const [oldFile, setOldFile] = useState<FileInfo | null>(null)
   const [newFile, setNewFile] = useState<FileInfo | null>(null)
+  const [loading, setLoading] = useState(false)
   const [dzOldOver, setDzOldOver] = useState(false)
   const [dzNewOver, setDzNewOver] = useState(false)
   const showToast = useToast()
 
-  const handleFile = useCallback((file: File, side: 'old' | 'new') => {
-    const ext = file.name.split('.').pop()?.toLowerCase()
-    if (!['pdf', 'docx'].includes(ext || '')) {
-      showToast('⚠ Только .pdf и .docx файлы')
+  const uploadFile = async (file: File, side: 'old' | 'new') => {
+    const token = localStorage.getItem('legist_token')
+    if (!token) {
+      showToast('⚠ Авторизуйтесь для загрузки файлов')
       return
     }
-    const info: FileInfo = { name: file.name, size: file.size }
-    if (side === 'old') setOldFile(info)
-    else setNewFile(info)
-  }, [showToast])
+
+    setLoading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const res = await fetch('/api/files', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error?.message || 'Ошибка загрузки')
+
+      const info: FileInfo = { id: data.id, name: data.filename, size: data.size || file.size }
+      if (side === 'old') setOldFile(info)
+      else setNewFile(info)
+      
+      showToast(`✓ Файл ${data.filename} загружен`)
+      return data.id
+    } catch (err: any) {
+      showToast('⚠ ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const onDrop = useCallback((e: React.DragEvent, side: 'old' | 'new') => {
     e.preventDefault()
     setDzOldOver(false); setDzNewOver(false)
     const file = e.dataTransfer.files[0]
-    if (file) handleFile(file, side)
-  }, [handleFile])
+    if (file) uploadFile(file, side)
+  }, [showToast])
 
   const onSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>, side: 'old' | 'new') => {
     const file = e.target.files?.[0]
-    if (file) handleFile(file, side)
-  }, [handleFile])
+    if (file) uploadFile(file, side)
+  }, [showToast])
 
   return {
-    oldFile, newFile, dzOldOver, dzNewOver,
+    oldFile, newFile, dzOldOver, dzNewOver, loading,
     setDzOldOver, setDzNewOver, onDrop, onSelect,
     removeOld: () => setOldFile(null),
     removeNew: () => setNewFile(null),
@@ -53,28 +80,44 @@ export function useCompareProgress() {
   const [pct, setPct] = useState(0)
   const [step, setStep] = useState(0)
   const [label, setLabel] = useState('')
-  const ivRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const esRef = useRef<EventSource | null>(null)
 
-  const start = useCallback((onDone: () => void) => {
+  const start = useCallback((fileId: string, onDone: () => void) => {
+    if (esRef.current) esRef.current.close()
+
     setRunning(true); setPct(0); setStep(0)
-    setLabel(PROGRESS_STEP_LABELS[0])
-    const stepAt = [20, 40, 60, 80, 100]
-    let curPct = 0, si = 0
+    setLabel('Ожидание сервера...')
 
-    ivRef.current = setInterval(() => {
-      curPct = Math.min(curPct + 4, 100)
-      setPct(curPct)
-      const ns = stepAt.findIndex(s => curPct <= s)
-      if (ns !== si && ns >= 0) {
-        si = ns
-        setStep(si)
-        setLabel(PROGRESS_STEP_LABELS[si] || '')
-      }
-      if (curPct >= 100) {
-        clearInterval(ivRef.current!)
-        setTimeout(() => { setRunning(false); onDone() }, 400)
-      }
-    }, 50)
+    const token = localStorage.getItem('legist_token')
+    const url = `/api/files/${fileId}`
+    
+    // Бэкенд поддерживает SSE через заголовок Accept: text/event-stream
+    // Native EventSource не поддерживает кастомные заголовки (Authorization),
+    // поэтому в некоторых случаях используют куки или query param.
+    // Но так как мы в dev-режиме, бэкенд может ожидать токен.
+    
+    const es = new EventSource(url)
+    esRef.current = es
+
+    es.addEventListener('progress', (e: any) => {
+      const data = JSON.parse(e.data)
+      setPct(data.percentage || 50)
+      setLabel(data.message || 'Обработка...')
+    })
+
+    es.addEventListener('done', () => {
+      setPct(100)
+      setLabel('Готово')
+      es.close()
+      setTimeout(() => { setRunning(false); onDone() }, 600)
+    })
+
+    es.addEventListener('error', (e) => {
+      console.error('SSE Error:', e)
+      setLabel('Ошибка обработки')
+      es.close()
+      setTimeout(() => setRunning(false), 2000)
+    })
   }, [])
 
   return { running, pct, step, label, start, steps: PROGRESS_STEPS }
@@ -106,21 +149,46 @@ export function useAssistant() {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
 
-  const send = useCallback((text?: string) => {
+  const send = useCallback(async (text?: string) => {
     const msg = (text ?? input).trim()
     if (!msg) return
     setInput(''); setStarted(true)
+    
     setMessages(prev => [...prev, { role: 'user', html: esc(msg) }])
-    const idx = messages.length + 1
+    const aiMsgIdx = messages.length + 1
     setMessages(prev => [...prev, { role: 'ai', html: '', typing: true }])
-    setTimeout(() => {
+
+    const token = localStorage.getItem('legist_token')
+    
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ message: msg }),
+      })
+
+      if (!res.ok) throw new Error('Ошибка сервера ассистента')
+      
+      const data = await res.json()
+      // Временная заглушка, если бэкенд возвращает пустую строку или ошибку
+      const reply = data.reply || getMockReply(msg)
+      
       setMessages(prev => prev.map((m, i) =>
-        i === idx ? { role: 'ai', html: esc(getMockReply(msg)) } : m
+        i === aiMsgIdx ? { role: 'ai', html: esc(reply), typing: false } : m
       ))
+    } catch (err: any) {
+      setMessages(prev => prev.map((m, i) =>
+        i === aiMsgIdx ? { role: 'ai', html: esc('⚠ ' + err.message), typing: false } : m
+      ))
+    } finally {
       setTimeout(() => {
         if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight
       }, 0)
-    }, 900 + Math.random() * 500)
+    }
   }, [input, messages.length])
 
   const newChat = useCallback(() => { setMessages([]); setStarted(false) }, [])

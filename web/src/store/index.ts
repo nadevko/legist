@@ -18,26 +18,62 @@ const savedUser = (() => {
   return { isAuthenticated: false, currentUser: { name: '', email: '' } }
 })()
 
-export const useAuthStore = create<AuthStore>((set) => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   isAuthenticated: savedUser.isAuthenticated,
   currentUser: savedUser.currentUser,
 
   login: async (email, password, name) => {
-    // BACKEND: замените на реальный запрос:
-    // const res = await fetch('/api/auth/login', { method:'POST',
-    //   headers:{'Content-Type':'application/json'},
-    //   body: JSON.stringify({ email, password, name }) })
-    // const data = await res.json()
-    // if (!res.ok) throw new Error(data.message)
-    // localStorage.setItem('legist_token', data.token)
-    await new Promise(r => setTimeout(r, 1300)) // симуляция — удалить
-    const user = { name: name || email.split('@')[0], email }
-    localStorage.setItem('legist_user', JSON.stringify(user))
-    set({ isAuthenticated: true, currentUser: user })
+    const isRegister = !!name
+    const endpoint = isRegister ? '/api/users' : '/api/sessions'
+    
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ email, password, name }),
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error?.message || 'Ошибка аутентификации')
+    }
+
+    // Если это была регистрация, нужно еще войти
+    if (isRegister) {
+      return get().login(email, password)
+    }
+
+    // Сохраняем токены
+    if (data.access_token) {
+      localStorage.setItem('legist_token', data.access_token)
+      if (data.refresh_token) {
+        localStorage.setItem('legist_refresh_token', data.refresh_token)
+      }
+      
+      const userRes = await fetch('/api/me', {
+        headers: {
+          'Authorization': `Bearer ${data.access_token}`
+        }
+      })
+      
+      let user = { name: data.email?.split('@')[0] || 'Пользователь', email: data.email || '' }
+      if (userRes.ok) {
+        const userData = await userRes.json()
+        user = { name: userData.email.split('@')[0], email: userData.email }
+      }
+      
+      localStorage.setItem('legist_user', JSON.stringify(user))
+      set({ isAuthenticated: true, currentUser: user })
+      return // Успешное завершение после установки стейта
+    }
   },
 
   logout: () => {
     localStorage.removeItem('legist_user')
+    localStorage.removeItem('legist_token')
+    localStorage.removeItem('legist_refresh_token')
     set({ isAuthenticated: false, currentUser: { name: '', email: '' } })
   },
 }))

@@ -11,12 +11,13 @@ export interface Act {
 }
 
 export interface Version {
+  id?: string
   num: number
   date: string
   author: string
   changes: number
   size: string
-  status: 'Актуальная' | 'Архив'
+  status: 'Актуальная' | 'Архив' | 'Загрузка'
   checked: boolean
 }
 
@@ -49,6 +50,7 @@ export interface User {
 }
 
 export interface FileInfo {
+  id?: string
   name: string
   size: number
 }
