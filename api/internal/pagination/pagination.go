@@ -19,30 +19,35 @@ func (p *Params) Normalize() {
 	}
 }
 
-// Page срезает limit+1 элемент и возвращает has_more.
-func Page[T any](items []T, limit int) ([]T, bool) {
-	if len(items) > limit {
-		return items[:limit], true
-	}
-	return items, false
-}
-
 // Response — стандартный list ответ в Stripe стиле.
 type Response[T any] struct {
-	Object  string `json:"object"` // "list"
-	Data    []T    `json:"data"`
-	HasMore bool   `json:"has_more"`
+	Object     string `json:"object"` // "list"
+	Data       []T    `json:"data"`
+	HasMore    bool   `json:"has_more"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// Page обрабатывает количество элементов (limit+1) и возвращает:
+// - items[:limit] - элементы для текущей страницы
+// - nextCursor - ID последнего элемента (использовать как starting_after для следующей страницы)
+// - hasMore - есть ли ещё элементы
+// Store методы должны сами обрабатывать StartingAfter/EndingBefore в SQL.
+func Page[T any](items []T, limit int, getID func(T) string) ([]T, string, bool) {
+	nextCursor := ""
+	hasMore := false
+	if len(items) > limit {
+		hasMore = true
+		nextCursor = getID(items[limit-1])
+		items = items[:limit]
+	}
+	return items, nextCursor, hasMore
 }
 
 // NewResponse применяет пагинацию и маппит элементы.
 func NewResponse[S any, T any](items []S, limit int, mapper func(S) T) Response[T] {
-	items, hasMore := Page(items, limit)
 	data := make([]T, len(items))
 	for i, item := range items {
 		data[i] = mapper(item)
 	}
-	if data == nil {
-		data = []T{}
-	}
-	return Response[T]{Object: "list", Data: data, HasMore: hasMore}
+	return Response[T]{Object: "list", Data: data, HasMore: false}
 }

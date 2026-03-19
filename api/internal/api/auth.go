@@ -198,7 +198,7 @@ func (s *Server) handleListSessions(c echo.Context) error {
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.JSON(http.StatusOK, listResult(sessions, p.Limit, toSessionResponse))
+	return c.JSON(http.StatusOK, listResult(sessions, p.Limit, toSessionResponse, func(s store.Session) string { return s.ID }))
 }
 
 // handleGetUser godoc

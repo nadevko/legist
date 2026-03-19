@@ -49,11 +49,30 @@ func (s *WebhookStore) GetEndpoint(id, userID string) (*WebhookEndpoint, error) 
 	return &e, nil
 }
 
-func (s *WebhookStore) ListEndpoints(userID string) ([]WebhookEndpoint, error) {
+func (s *WebhookStore) ListEndpoints(userID string, p pagination.Params) ([]WebhookEndpoint, error) {
+	p.Normalize()
+
+	q := strings.Builder{}
+	args := []any{userID}
+
+	q.WriteString(`SELECT * FROM webhook_endpoints WHERE user_id = ?`)
+
+	if p.StartingAfter != "" {
+		q.WriteString(` AND (created_at < (SELECT created_at FROM webhook_endpoints WHERE id = ?)
+			OR (created_at = (SELECT created_at FROM webhook_endpoints WHERE id = ?) AND id < ?))`)
+		args = append(args, p.StartingAfter, p.StartingAfter, p.StartingAfter)
+	}
+	if p.EndingBefore != "" {
+		q.WriteString(` AND (created_at > (SELECT created_at FROM webhook_endpoints WHERE id = ?)
+			OR (created_at = (SELECT created_at FROM webhook_endpoints WHERE id = ?) AND id > ?))`)
+		args = append(args, p.EndingBefore, p.EndingBefore, p.EndingBefore)
+	}
+
+	q.WriteString(` ORDER BY created_at DESC LIMIT ?`)
+	args = append(args, p.Limit+1)
+
 	var endpoints []WebhookEndpoint
-	if err := s.db.Select(&endpoints,
-		`SELECT * FROM webhook_endpoints WHERE user_id = ? ORDER BY created_at DESC`, userID,
-	); err != nil {
+	if err := s.db.Select(&endpoints, q.String(), args...); err != nil {
 		return nil, fmt.Errorf("list webhook endpoints: %w", err)
 	}
 	for i := range endpoints {

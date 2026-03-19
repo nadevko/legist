@@ -84,11 +84,15 @@ func (s *Server) handleCreateWebhook(c echo.Context) error {
 // @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks [get]
 func (s *Server) handleListWebhooks(c echo.Context) error {
-	endpoints, err := s.webhooks.ListEndpoints(auth.UserID(c))
+	p, err := bindListParams(c)
+	if err != nil {
+		return err
+	}
+	endpoints, err := s.webhooks.ListEndpoints(auth.UserID(c), p.toStore())
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.JSON(http.StatusOK, listResult(endpoints, 100, toWebhookResponse))
+	return c.JSON(http.StatusOK, listResult(endpoints, p.Limit, toWebhookResponse, func(e store.WebhookEndpoint) string { return e.ID }))
 }
 
 // handleGetWebhook godoc
@@ -210,7 +214,7 @@ func (s *Server) handleListWebhookEvents(c echo.Context) error {
 			Attempts:   e.Attempts,
 			Created:    toUnix(e.CreatedAt),
 		}
-	}))
+	}, func(e store.WebhookEvent) string { return e.ID }))
 }
 
 func toWebhookResponse(ep store.WebhookEndpoint) webhookEndpointResponse {

@@ -44,7 +44,7 @@ func (s *Server) handleListFiles(c echo.Context) error {
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.JSON(http.StatusOK, listResult(files, p.Limit, toFileResponse))
+	return c.JSON(http.StatusOK, listResult(files, p.Limit, toFileResponse, func(f store.File) string { return f.ID }))
 }
 
 // handleGetFile godoc

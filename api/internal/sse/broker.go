@@ -1,10 +1,12 @@
 package sse
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -51,19 +53,23 @@ func (b *Broker) Subscribe(key string) (ch chan Event, unsubscribe func()) {
 	return ch, unsubscribe
 }
 
-// Publish отправляет событие всем подписчикам ключа.
 func (b *Broker) Publish(key string, evt Event) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-	for _, ch := range b.subs[key] {
+	subs := b.subs[key]
+	b.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, ch := range subs {
 		select {
 		case ch <- evt:
-		default:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
-// Stream читает события из брокера по ключу и пишет их в SSE-соединение.
 func Stream(c echo.Context, b *Broker, key string) error {
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")

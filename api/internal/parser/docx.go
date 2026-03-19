@@ -130,10 +130,3 @@ func (c *idCounter) next(level int) string {
 	}
 	return "s" + strings.Join(parts, ".")
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

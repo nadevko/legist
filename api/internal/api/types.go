@@ -121,15 +121,13 @@ func deleted(id, object string) deletedResponse {
 // — List response —
 
 type listResponse[T any] struct {
-	Object  string `json:"object"` // "list"
-	Data    []T    `json:"data"`
-	HasMore bool   `json:"has_more"`
+	Object     string `json:"object"` // "list"
+	Data       []T    `json:"data"`
+	HasMore    bool   `json:"has_more"`
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 func newList[T any](data []T, hasMore bool) listResponse[T] {
-	if data == nil {
-		data = []T{}
-	}
 	return listResponse[T]{Object: "list", Data: data, HasMore: hasMore}
 }
 
