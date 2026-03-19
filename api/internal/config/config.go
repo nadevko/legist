@@ -8,6 +8,7 @@ type Config struct {
 	DataPath   string
 	JWTSecret  string
 	PublicHost string
+	BasePath   string
 	Dev        bool
 
 	QdrantHost     string
@@ -31,6 +32,7 @@ func Load() *Config {
 		DataPath:   getEnv("DATA_PATH", "../data"),
 		JWTSecret:  getEnv("JWT_SECRET", "change-me-in-prod"),
 		PublicHost: getEnv("PUBLIC_HOST", ""),
+		BasePath:   getEnv("BASE_PATH", ""),
 		Dev:        getEnv("ENV", "dev") == "dev",
 
 		QdrantHost:     getEnv("QDRANT_HOST", "127.0.0.1"),

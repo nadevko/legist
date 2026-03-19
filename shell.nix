@@ -1,21 +1,23 @@
 {
   mkShell,
   go,
+  go-swag,
   delve,
   golangci-lint,
   gomod2nix,
   gopls,
   gotools,
-  poppler_utils,
+  poppler-utils,
 }: mkShell {
   packages = [
-    go
     delve
+    go
+    go-swag
     golangci-lint
     gomod2nix
     gopls
     gotools
-    poppler_utils
+    poppler-utils
   ];
 
   hardeningDisable = [ "fortify" ];

@@ -1,4 +1,4 @@
-package api
+package middleware
 
 import (
 	"errors"
@@ -10,7 +10,9 @@ import (
 	"github.com/nadevko/legist/internal/store"
 )
 
-func (s *Server) idempotencyMiddleware() echo.MiddlewareFunc {
+// Idempotency creates a middleware that handles idempotent requests.
+// Caches responses for POST/PATCH/DELETE requests with Idempotency-Key header.
+func Idempotency(idempotencyStore *store.IdempotencyStore) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			method := c.Request().Method
@@ -23,8 +25,7 @@ func (s *Server) idempotencyMiddleware() echo.MiddlewareFunc {
 			key := c.Request().Header.Get("Idempotency-Key")
 			if key == "" {
 				if method == http.MethodPost {
-					return errorf(http.StatusBadRequest, "missing_idempotency_key",
-						"Idempotency-Key header is required for POST requests")
+					return echo.NewHTTPError(http.StatusBadRequest, errorResp("invalid_request_error", "missing_idempotency_key", "Idempotency-Key header is required for POST requests"))
 				}
 				return next(c)
 			}
@@ -37,11 +38,10 @@ func (s *Server) idempotencyMiddleware() echo.MiddlewareFunc {
 			path := c.Request().URL.Path
 
 			// проверяем существующий ключ
-			existing, err := s.idempotency.Get(key, userID)
+			existing, err := idempotencyStore.Get(key, userID)
 			if err == nil {
 				if existing.Method != method || existing.Path != path {
-					return errorf(http.StatusUnprocessableEntity, "idempotency_key_reuse",
-						"idempotency key already used for a different request")
+					return echo.NewHTTPError(http.StatusUnprocessableEntity, errorResp("conflict_error", "idempotency_key_reuse", "idempotency key already used for a different request"))
 				}
 				if existing.Response != "" {
 					// завершённый запрос — возвращаем кэш
@@ -50,17 +50,15 @@ func (s *Server) idempotencyMiddleware() echo.MiddlewareFunc {
 					return c.JSONBlob(existing.Status, []byte(existing.Response))
 				}
 				// response пустой — запрос ещё выполняется
-				return errorf(http.StatusConflict, "idempotency_key_in_use",
-					"a request with this idempotency key is already in progress")
+				return echo.NewHTTPError(http.StatusConflict, errorResp("conflict_error", "idempotency_key_in_use", "a request with this idempotency key is already in progress"))
 			}
 
 			// резервируем ключ
-			if err = s.idempotency.Lock(key, userID, method, path); err != nil {
+			if err = idempotencyStore.Lock(key, userID, method, path); err != nil {
 				if errors.Is(err, store.ErrConflict) {
-					return errorf(http.StatusConflict, "idempotency_key_in_use",
-						"a request with this idempotency key is already in progress")
+					return echo.NewHTTPError(http.StatusConflict, errorResp("conflict_error", "idempotency_key_in_use", "a request with this idempotency key is already in progress"))
 				}
-				return errorf(http.StatusInternalServerError, "server_error", "internal error")
+				return echo.NewHTTPError(http.StatusInternalServerError, errorResp("api_error", "server_error", "internal error"))
 			}
 
 			// перехватываем ответ
@@ -73,14 +71,17 @@ func (s *Server) idempotencyMiddleware() echo.MiddlewareFunc {
 			}
 
 			// сохраняем результат
-			s.idempotency.Set(&store.IdempotencyKey{
+			if err = idempotencyStore.Set(&store.IdempotencyKey{
 				Key:      key,
 				UserID:   userID,
 				Method:   method,
 				Path:     path,
 				Status:   rw.status,
 				Response: rw.buf.String(),
-			})
+			}); err != nil {
+				// Log error but don't fail the request - response already sent to client
+				_ = err
+			}
 
 			c.Response().Header().Set("Idempotency-Key", key)
 			c.Response().Writer = rw.ResponseWriter

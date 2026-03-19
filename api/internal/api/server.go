@@ -10,11 +10,13 @@ import (
 
 	"github.com/nadevko/legist/internal/auth"
 	"github.com/nadevko/legist/internal/config"
+	mw "github.com/nadevko/legist/internal/middleware"
 	"github.com/nadevko/legist/internal/sse"
 	"github.com/nadevko/legist/internal/store"
 	"github.com/nadevko/legist/internal/webhook"
 )
 
+// Server encapsulates all HTTP handlers and dependencies.
 type Server struct {
 	e           *echo.Echo
 	cfg         *config.Config
@@ -28,6 +30,7 @@ type Server struct {
 	broker      *sse.Broker
 }
 
+// NewServer creates and configures a new HTTP server with all middleware and routes.
 func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 	webhookStore := store.NewWebhookStore(db)
 	s := &Server{
@@ -54,79 +57,50 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 			c.Response().Header().Set("Request-Id", id)
 		},
 	}))
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			c.Response().Header().Set("Legist-Version", auth.Version)
-			if v := c.Request().Header.Get("Legist-Version"); v != "" && v != auth.Version {
-				c.Response().Header().Set("Legist-Version-Warning",
-					"requested version "+v+" is not supported, using "+auth.Version)
-			}
-			return next(c)
-		}
-	})
-	e.Use(s.expandMiddleware())
-	e.Use(s.idempotencyMiddleware())
-
-	if cfg.Dev {
-		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-			AllowOrigins: []string{"*"},
-			AllowMethods: []string{
-				http.MethodGet,
-				http.MethodPost,
-				http.MethodPatch,
-				http.MethodDelete,
-				http.MethodOptions,
-			},
-			AllowHeaders: []string{
-				"Content-Type",
-				"Authorization",
-				"Idempotency-Key",
-				"Legist-Version",
-			},
-		}))
-	}
+	e.Use(mw.Version())
+	e.Use(mw.TrailingSlash(cfg.BasePath))
+	e.Use(mw.Expand(s))
+	e.Use(mw.Idempotency(s.idempotency))
+	e.Use(mw.CORS(cfg))
 
 	s.registerRoutes()
 	return s
 }
 
+// registerRoutes sets up all API routes.
 func (s *Server) registerRoutes() {
 	e := s.e
 
 	e.GET("/", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
 	})
-	e.GET("/swagger", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
-	})
-	e.GET("/swagger/*", echoSwagger.EchoWrapHandler(func(c *echoSwagger.Config) {
-		c.URLs = []string{"v1-alpha.json"}
-	}))
-	e.GET("/swagger/v1-alpha.json", func(c echo.Context) error {
-		return c.File("docs/v1-alpha.json")
-	})
-	e.GET("/health", s.handleHealth)
 
-	e.GET("/swagger", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+	// API routes with base path
+	api := e.Group(s.cfg.BasePath)
+
+	// Redirect /api/ to /api/swagger/
+	api.GET("/", func(c echo.Context) error {
+		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
 	})
-	e.GET("/swagger/*", echoSwagger.EchoWrapHandler(func(c *echoSwagger.Config) {
+
+	// Swagger routes (public) - wildcard catches /api/swagger/ and everything under it
+	api.GET("/swagger/*", echoSwagger.EchoWrapHandler(func(c *echoSwagger.Config) {
 		c.URLs = []string{"v1-alpha.json"}
 	}))
-	e.GET("/swagger/v1-alpha.json", func(c echo.Context) error {
+	api.GET("/swagger/v1-alpha.json", func(c echo.Context) error {
 		return c.File("docs/v1-alpha.json")
 	})
-	e.GET("/health", s.handleHealth)
+	api.GET("/health", s.handleHealth)
 
 	// public — auth
-	e.POST("/users", s.handleRegister)
-	e.POST("/sessions", s.handleLogin)
-	e.POST("/tokens/refresh", s.handleRefresh)
-	e.POST("/tokens/password-reset", s.handleRequestPasswordReset)
-	e.PATCH("/tokens/password-reset", s.handleChangePassword)
+	api.POST("/users", s.handleRegister)
+	api.POST("/sessions", s.handleLogin)
+	api.POST("/tokens/refresh", s.handleRefresh)
+	api.POST("/tokens/password-reset", s.handleRequestPasswordReset)
+	api.PATCH("/tokens/password-reset", s.handleChangePassword)
 
 	// protected
-	p := e.Group("", auth.Middleware(s.cfg.JWTSecret))
+	p := api.Group("", auth.Middleware(s.cfg.JWTSecret))
 
 	p.GET("/me", s.handleGetUser)
 	p.PATCH("/me", s.handleUpdateUser)
@@ -153,6 +127,7 @@ func (s *Server) registerRoutes() {
 	p.POST("/chat", s.handleChat)
 }
 
+// Start begins listening for HTTP requests.
 func (s *Server) Start() error {
 	return s.e.Start(s.cfg.Addr)
 }

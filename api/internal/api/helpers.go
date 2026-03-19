@@ -30,15 +30,6 @@ func listResult[S any, T any](items []S, limit int, mapper func(S) T) listRespon
 	return listResponse[T]{Object: "list", Data: data, HasMore: hasMore}
 }
 
-// parseExpand парсит query params expand[] в set.
-func parseExpand(c echo.Context) map[string]bool {
-	result := map[string]bool{}
-	for _, v := range c.QueryParams()["expand[]"] {
-		result[v] = true
-	}
-	return result
-}
-
 // ownerFilter возвращает FileFilter на основе query param owner.
 // Без owner — файлы текущего юзера. owner=public — публичные (user_id IS NULL).
 func ownerFilter(c echo.Context) (store.FileFilter, error) {
