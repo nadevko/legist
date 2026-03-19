@@ -7,13 +7,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// ExpandLoader defines methods needed for expand middleware to load resources.
+// ExpandLoader defines the method needed by the expand middleware to resolve resources.
 type ExpandLoader interface {
 	LoadResource(resource, id string) any
 }
 
-// Expand creates a middleware that expands related resources based on query parameter.
-// The expander must implement ExpandLoader interface.
+// Expand creates a middleware that expands *_id fields in JSON responses
+// based on the expand[] query parameter.
 func Expand(expander ExpandLoader) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -21,7 +21,6 @@ func Expand(expander ExpandLoader) echo.MiddlewareFunc {
 			if len(expand) == 0 {
 				return next(c)
 			}
-
 			if c.Request().Header.Get("Accept") == "text/event-stream" {
 				return next(c)
 			}
@@ -33,7 +32,6 @@ func Expand(expander ExpandLoader) echo.MiddlewareFunc {
 				c.Response().Writer = rw.ResponseWriter
 				return err
 			}
-
 			c.Response().Writer = rw.ResponseWriter
 
 			ct := rw.ResponseWriter.Header().Get("Content-Type")

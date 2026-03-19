@@ -8,8 +8,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// bufferedWriter buffers response body and intercepts status code.
-// Used in expand and idempotency middleware.
+// bufferedWriter buffers the response body and intercepts the status code.
+// Used by expand and idempotency middleware to post-process responses.
 type bufferedWriter struct {
 	http.ResponseWriter
 	buf    *bytes.Buffer
@@ -42,11 +42,12 @@ func parseExpand(c echo.Context) map[string]bool {
 	return result
 }
 
-// errorResp creates a JSON response for error messages in standard API format.
+// errorResp builds a standard API error JSON blob for use in middleware
+// before the full Echo error handler is available.
 func errorResp(errType, code, message string) json.RawMessage {
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"object": "error",
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"type":    errType,
 			"code":    code,
 			"message": message,

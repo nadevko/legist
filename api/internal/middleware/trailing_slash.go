@@ -2,25 +2,35 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
 
-// TrailingSlash normalizes trailing slashes for GET requests to swagger routes.
 func TrailingSlash(basePath string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if c.Request().Method == http.MethodGet {
-				path := c.Request().URL.Path
-				// Redirect /api/swagger to /api/swagger/
-				if path == basePath+"/swagger" {
-					return c.Redirect(http.StatusMovedPermanently, path+"/")
-				}
-				// Redirect /api to /api/
-				if path == basePath {
-					return c.Redirect(http.StatusMovedPermanently, path+"/")
-				}
+			if c.Request().Method != http.MethodGet {
+				return next(c)
 			}
+
+			req := c.Request()
+			path := req.URL.Path
+
+			base := strings.TrimRight(basePath, "/")
+
+			if path == base || path == base+"/swagger" {
+				query := ""
+				if req.URL.RawQuery != "" {
+					query = "?" + req.URL.RawQuery
+				}
+
+				return c.Redirect(
+					http.StatusTemporaryRedirect,
+					path+"/"+query,
+				)
+			}
+
 			return next(c)
 		}
 	}

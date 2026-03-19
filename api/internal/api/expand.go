@@ -4,6 +4,7 @@ import (
 	"strings"
 )
 
+// expandJSON recursively expands _id fields in the JSON data tree.
 func (s *Server) expandJSON(data any, expand map[string]bool) any {
 	switch v := data.(type) {
 	case map[string]any:
@@ -40,23 +41,4 @@ func (s *Server) expandObject(obj map[string]any, expand map[string]bool) map[st
 		obj[key] = s.expandJSON(val, expand)
 	}
 	return obj
-}
-
-func (s *Server) LoadResource(resource, id string) any {
-	switch resource {
-	case "user":
-		u, err := s.users.GetByID(id)
-		if err != nil {
-			return nil
-		}
-		return toUserResponse(*u)
-	case "file":
-		f, err := s.files.GetByID(id)
-		if err != nil {
-			return nil
-		}
-		return toFileResponse(*f)
-	default:
-		return nil
-	}
 }

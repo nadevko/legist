@@ -8,68 +8,68 @@ import (
 	"strings"
 )
 
-// Паттерны для определения заголовков в белорусских НПА.
-// Порядок важен — более специфичные паттерны первее.
+// Heading patterns for Belarusian НПА. Order matters — more specific first.
 var headingPatterns = []struct {
 	re    *regexp.Regexp
 	level int
 }{
-	// Глава 1, ГЛАВА I
-	{regexp.MustCompile(`(?i)^(глава|раздел)\s+[\dIVXivx]+[.\s]`), 0},
-	// Статья 1., Артыкул 1.
-	{regexp.MustCompile(`(?i)^(стаття|статья|артыкул)\s+\d+[.\s]`), 1},
-	// 1. Пункт (цифра с точкой в начале строки)
+	// Глава 1 / Раздел I
+	{regexp.MustCompile(`(?i)^(глава|раздел)\s+[\dIVXivx]+`), 0},
+	// Статья 1 / Артыкул 1
+	{regexp.MustCompile(`(?i)^(стаття|статья|артыкул)\s+\d+`), 1},
+	// 1.1. sub-clause (check before simple 1.)
+	{regexp.MustCompile(`^\d+\.\d+\.?\s+`), 2},
+	// 1. clause starting with uppercase
 	{regexp.MustCompile(`^\d+\.\s+[А-ЯЁA-Z]`), 2},
-	// 1.1. Подпункт
-	{regexp.MustCompile(`^\d+\.\d+\.\s+`), 2},
-	// 1) или а) — часть
+	// 1) or а) — part
 	{regexp.MustCompile(`^(\d+|[а-яa-z])\)\s+`), 3},
 }
 
 type pdfParser struct{}
 
+// Parse implements Parser. Reads all bytes from r and pipes them to pdftotext.
+// Prefer pdfParseByPath when the file path is available — it's more reliable.
 func (p *pdfParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
-	// pdftotext читает из stdin, пишет в stdout
-	// -layout сохраняет пространственное расположение текста
-	// -enc UTF-8 для корректной кириллицы
-	cmd := exec.Command("pdftotext", "-layout", "-enc", "UTF-8", "-", "-")
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
+	buf := make([]byte, size)
+	if _, err := r.ReadAt(buf, 0); err != nil && err != io.EOF {
+		return nil, fmt.Errorf("read pdf: %w", err)
 	}
-
-	// копируем файл в stdin
-	go func() {
-		defer stdin.Close()
-		buf := make([]byte, 32*1024)
-		var offset int64
-		for {
-			n, err := r.ReadAt(buf, offset)
-			if n > 0 {
-				stdin.Write(buf[:n])
-				offset += int64(n)
-			}
-			if err != nil {
-				break
-			}
-		}
-	}()
-
+	cmd := exec.Command("pdftotext", "-enc", "UTF-8", "-", "-")
+	cmd.Stdin = strings.NewReader(string(buf))
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("pdftotext: %w", err)
 	}
-
 	return parseText(string(out)), nil
 }
 
-// parseText строит иерархию Document из плоского текста.
+// pdfParseByPath is preferred when the file path is available.
+// Passes the path directly to pdftotext — avoids reading all bytes into memory
+// and is more reliable across poppler versions that don't support stdin.
+func pdfParseByPath(path string) (*Document, error) {
+	out, err := exec.Command("pdftotext", "-enc", "UTF-8", path, "-").Output()
+	if err != nil {
+		return nil, fmt.Errorf("pdftotext: %w", err)
+	}
+	return parseText(string(out)), nil
+}
+
+// parseText builds a Document from flat pdftotext output.
 func parseText(text string) *Document {
 	lines := strings.Split(text, "\n")
 	result := &Document{}
-	var stack []*Section
 	counter := &idCounter{}
+
+	type entry struct{ idx int }
+	var stack []entry
+
+	getSection := func() *Section {
+		sec := &result.Sections[stack[0].idx]
+		for _, e := range stack[1:] {
+			sec = &sec.Children[e.idx]
+		}
+		return sec
+	}
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -85,19 +85,19 @@ func parseText(text string) *Document {
 				Label: line,
 				Level: level,
 			}
-
-			stack = stack[:min(len(stack), level)]
-
+			if level < len(stack) {
+				stack = stack[:level]
+			}
 			if len(stack) == 0 {
 				result.Sections = append(result.Sections, sec)
-				stack = append(stack, &result.Sections[len(result.Sections)-1])
+				stack = append(stack, entry{len(result.Sections) - 1})
 			} else {
-				parent := stack[len(stack)-1]
+				parent := getSection()
 				parent.Children = append(parent.Children, sec)
-				stack = append(stack, &parent.Children[len(parent.Children)-1])
+				stack = append(stack, entry{len(parent.Children) - 1})
 			}
 		} else if len(stack) > 0 {
-			cur := stack[len(stack)-1]
+			cur := getSection()
 			if cur.Text == "" {
 				cur.Text = line
 			} else {

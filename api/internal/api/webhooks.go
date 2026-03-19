@@ -3,7 +3,9 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/labstack/echo/v4"
 
@@ -13,8 +15,9 @@ import (
 )
 
 type webhookEndpointRequest struct {
-	URL    string   `json:"url"    example:"https://example.com/webhook"`
-	Events []string `json:"events" example:"[\"file.created\",\"diff.done\"]"`
+	URL     string   `json:"url"     example:"https://example.com/webhook"`
+	Events  []string `json:"events"  example:"[\"file.created\",\"diff.done\"]"`
+	Enabled *bool    `json:"enabled"` // nil = do not change; false = disable; true = enable
 }
 
 type webhookEndpointResponse struct {
@@ -47,15 +50,23 @@ type webhookEventResponse struct {
 // @Success     201 {object} webhookEndpointResponse
 // @Failure     400 {object} apiErrorResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks [post]
 func (s *Server) handleCreateWebhook(c echo.Context) error {
 	var body webhookEndpointRequest
-	if err := c.Bind(&body); err != nil || body.URL == "" {
+	if err := c.Bind(&body); err != nil {
+		return errorf(http.StatusBadRequest, "parameter_missing", "invalid body")
+	}
+	if body.URL == "" {
 		return errorf(http.StatusBadRequest, "parameter_missing", "url is required", "url")
+	}
+	if err := validateWebhookURL(body.URL); err != nil {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value", err.Error(), "url")
 	}
 	if len(body.Events) == 0 {
 		return errorf(http.StatusBadRequest, "parameter_missing", "events is required", "events")
+	}
+	if err := validateEvents(body.Events); err != nil {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value", err.Error(), "events")
 	}
 
 	ep := &store.WebhookEndpoint{
@@ -81,7 +92,6 @@ func (s *Server) handleCreateWebhook(c echo.Context) error {
 // @Param       starting_after query string false "Cursor"
 // @Success     200 {object} listResponse[webhookEndpointResponse]
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks [get]
 func (s *Server) handleListWebhooks(c echo.Context) error {
 	p, err := bindListParams(c)
@@ -92,7 +102,8 @@ func (s *Server) handleListWebhooks(c echo.Context) error {
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.JSON(http.StatusOK, listResult(endpoints, p.Limit, toWebhookResponse, func(e store.WebhookEndpoint) string { return e.ID }))
+	return c.JSON(http.StatusOK, listResult(endpoints, p.Limit,
+		toWebhookResponse, func(e store.WebhookEndpoint) string { return e.ID }))
 }
 
 // handleGetWebhook godoc
@@ -102,49 +113,60 @@ func (s *Server) handleListWebhooks(c echo.Context) error {
 // @Param       id path string true "Webhook endpoint ID"
 // @Produce     json
 // @Success     200 {object} webhookEndpointResponse
-// @Failure     401 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
 // @Router      /webhooks/{id} [get]
 func (s *Server) handleGetWebhook(c echo.Context) error {
 	id := c.Param("id")
 	ep, err := s.webhooks.GetEndpoint(id, auth.UserID(c))
 	if err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such webhook endpoint: "+id)
+		return errorf(http.StatusNotFound, "resource_missing",
+			"no such webhook endpoint: "+id)
 	}
 	return c.JSON(http.StatusOK, toWebhookResponse(*ep))
 }
 
 // handleUpdateWebhook godoc
-// @Summary     Update webhook endpoint
+// @Summary     Update webhook endpoint (url, events, enabled)
 // @Tags        webhooks
 // @Security    BearerAuth
 // @Param       id              path   string                 true  "Webhook endpoint ID"
-// @Param       body            body   webhookEndpointRequest true  "Endpoint config"
+// @Param       body            body   webhookEndpointRequest true  "Fields to update"
 // @Param       Idempotency-Key header string                 false "Idempotency key"
 // @Accept      json
 // @Produce     json
 // @Success     200 {object} webhookEndpointResponse
 // @Failure     400 {object} apiErrorResponse
-// @Failure     401 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks/{id} [patch]
 func (s *Server) handleUpdateWebhook(c echo.Context) error {
 	id := c.Param("id")
 	ep, err := s.webhooks.GetEndpoint(id, auth.UserID(c))
 	if err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such webhook endpoint: "+id)
+		return errorf(http.StatusNotFound, "resource_missing",
+			"no such webhook endpoint: "+id)
 	}
 
 	var body webhookEndpointRequest
 	if err = c.Bind(&body); err != nil {
 		return errorf(http.StatusBadRequest, "invalid_request", "invalid body")
 	}
+
 	if body.URL != "" {
+		if err = validateWebhookURL(body.URL); err != nil {
+			return errorf(http.StatusBadRequest, "invalid_parameter_value",
+				err.Error(), "url")
+		}
 		ep.URL = body.URL
 	}
 	if len(body.Events) > 0 {
+		if err = validateEvents(body.Events); err != nil {
+			return errorf(http.StatusBadRequest, "invalid_parameter_value",
+				err.Error(), "events")
+		}
 		ep.Events = body.Events
+	}
+	if body.Enabled != nil {
+		ep.Enabled = *body.Enabled
 	}
 
 	if err = s.webhooks.UpdateEndpoint(ep); err != nil {
@@ -160,14 +182,13 @@ func (s *Server) handleUpdateWebhook(c echo.Context) error {
 // @Param       id              path   string true  "Webhook endpoint ID"
 // @Param       Idempotency-Key header string false "Idempotency key"
 // @Success     200 {object} deletedResponse
-// @Failure     401 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks/{id} [delete]
 func (s *Server) handleDeleteWebhook(c echo.Context) error {
 	id := c.Param("id")
 	if _, err := s.webhooks.GetEndpoint(id, auth.UserID(c)); err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such webhook endpoint: "+id)
+		return errorf(http.StatusNotFound, "resource_missing",
+			"no such webhook endpoint: "+id)
 	}
 	if err := s.webhooks.DeleteEndpoint(id, auth.UserID(c)); err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
@@ -180,41 +201,75 @@ func (s *Server) handleDeleteWebhook(c echo.Context) error {
 // @Tags        webhooks
 // @Security    BearerAuth
 // @Param       id             path   string true  "Webhook endpoint ID"
+// @Param       status         query  string false "pending|delivered|failed"
 // @Param       limit          query  int    false "Limit"
 // @Param       starting_after query  string false "Cursor"
 // @Produce     json
 // @Success     200 {object} listResponse[webhookEventResponse]
-// @Failure     401 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /webhooks/{id}/events [get]
 func (s *Server) handleListWebhookEvents(c echo.Context) error {
 	id := c.Param("id")
 	if _, err := s.webhooks.GetEndpoint(id, auth.UserID(c)); err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such webhook endpoint: "+id)
+		return errorf(http.StatusNotFound, "resource_missing",
+			"no such webhook endpoint: "+id)
 	}
-
 	p, err := bindListParams(c)
 	if err != nil {
 		return err
 	}
-
 	events, err := s.webhooks.ListEvents(id, p.toStore())
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
+	return c.JSON(http.StatusOK, listResult(events, p.Limit,
+		func(e store.WebhookEvent) webhookEventResponse {
+			return webhookEventResponse{
+				ID:         e.ID,
+				Object:     "webhook.event",
+				EndpointID: e.EndpointID,
+				Type:       e.Type,
+				Status:     e.Status,
+				Attempts:   e.Attempts,
+				Created:    toUnix(e.CreatedAt),
+			}
+		}, func(e store.WebhookEvent) string { return e.ID }))
+}
 
-	return c.JSON(http.StatusOK, listResult(events, p.Limit, func(e store.WebhookEvent) webhookEventResponse {
-		return webhookEventResponse{
-			ID:         e.ID,
-			Object:     "webhook.event",
-			EndpointID: e.EndpointID,
-			Type:       e.Type,
-			Status:     e.Status,
-			Attempts:   e.Attempts,
-			Created:    toUnix(e.CreatedAt),
+// --- helpers ---
+
+// validEvents is the set of allowed event type strings.
+var validEvents = func() map[string]struct{} {
+	m := make(map[string]struct{})
+	for _, e := range AllEvents() {
+		m[e] = struct{}{}
+	}
+	return m
+}()
+
+// validateEvents returns an error if any event string is not in AllEvents().
+func validateEvents(events []string) error {
+	for _, e := range events {
+		if _, ok := validEvents[e]; !ok {
+			return fmt.Errorf("unknown event type: %q", e)
 		}
-	}, func(e store.WebhookEvent) string { return e.ID }))
+	}
+	return nil
+}
+
+// validateWebhookURL checks that the URL is absolute and uses http or https.
+func validateWebhookURL(raw string) error {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https scheme")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL must have a host")
+	}
+	return nil
 }
 
 func toWebhookResponse(ep store.WebhookEndpoint) webhookEndpointResponse {
@@ -238,7 +293,7 @@ func generateSecret() string {
 	return "whsec_" + hex.EncodeToString(b)
 }
 
-// AllEvents возвращает все поддерживаемые типы событий.
+// AllEvents returns all supported event types.
 func AllEvents() []string {
 	return []string{
 		webhook.EventFileCreated,

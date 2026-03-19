@@ -22,12 +22,14 @@ func main() {
 	srv := api.NewServer(cfg, db)
 
 	log.Printf("starting server on %s (dev=%v)", cfg.Addr, cfg.Dev)
-	log.Printf("base path: %s", cfg.BasePath)
-	log.Printf("public host: %s", cfg.PublicHost)
-	log.Printf("swagger: %s%s%s/swagger/index.html", cfg.BasePath, cfg.Addr, cfg.BasePath)
+	log.Printf("base path: %q", cfg.BasePath)
+	log.Printf("public host: %q", cfg.PublicHost)
 	log.Printf("llm: metadata=%s/%s analysis=%s/%s",
 		cfg.LLMMetadataProvider, cfg.MetadataModel,
 		cfg.LLMAnalysisProvider, cfg.AnalysisModel,
+	)
+	log.Printf("llm: window=%d chars, retries=%d",
+		cfg.MetadataWindowSize, cfg.MetadataMaxRetries,
 	)
 	log.Printf("qdrant: %s:%s", cfg.QdrantHost, cfg.QdrantGRPCPort)
 	log.Printf("ollama: %s", cfg.OllamaBaseURL)

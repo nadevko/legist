@@ -6,7 +6,8 @@ import (
 	"github.com/nadevko/legist/internal/auth"
 )
 
-// Version adds Legist-Version header to responses.
+// Version adds the Legist-Version header to every response.
+// If the request carries a mismatched Legist-Version header, a warning is added.
 func Version() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {

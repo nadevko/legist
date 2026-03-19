@@ -18,13 +18,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
-	id          TEXT PRIMARY KEY,
-	user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	token_hash  TEXT NOT NULL,
-	expires_at  DATETIME NOT NULL,
-	created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL,
+	expires_at DATETIME NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS sessions_token_hash ON sessions(token_hash);
 
 CREATE TABLE IF NOT EXISTS password_resets (
@@ -34,21 +33,58 @@ CREATE TABLE IF NOT EXISTS password_resets (
 	expires_at DATETIME NOT NULL,
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS password_resets_token_hash ON password_resets(token_hash);
 
-CREATE TABLE IF NOT EXISTS files (
-	id         TEXT PRIMARY KEY,
-	user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
-	name       TEXT NOT NULL,
-	mime_type  TEXT NOT NULL,
-	size       INTEGER NOT NULL,
-	path       TEXT NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'pending',
+-- AKN Work-level entity. Groups all file versions of one НПА.
+-- subtype/number/author/date may be NULL while the first file is processing.
+CREATE TABLE IF NOT EXISTS documents (
+	id        TEXT PRIMARY KEY,
+	user_id   TEXT REFERENCES users(id) ON DELETE CASCADE,
+
+	subtype   TEXT,
+	number    TEXT,
+	author    TEXT,
+	date      TEXT,
+
+	country   TEXT NOT NULL DEFAULT 'by',
+	name      TEXT,
+	npa_level INTEGER NOT NULL DEFAULT 8,
+
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS documents_user_id ON documents(user_id);
+-- Prevent duplicate documents for the same owner+identity.
+-- WHERE clause allows NULLs (incomplete docs) to coexist freely.
+CREATE UNIQUE INDEX IF NOT EXISTS documents_identity
+	ON documents(user_id, subtype, number, date)
+	WHERE subtype IS NOT NULL AND number IS NOT NULL AND date IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS files_user_id ON files(user_id);
+CREATE TABLE IF NOT EXISTS files (
+	id          TEXT PRIMARY KEY,
+	user_id     TEXT REFERENCES users(id) ON DELETE CASCADE,
+	document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+
+	name      TEXT    NOT NULL,
+	mime_type TEXT    NOT NULL,
+	size      INTEGER NOT NULL,
+	path      TEXT    NOT NULL,
+	status    TEXT    NOT NULL DEFAULT 'pending',
+
+	-- AKN FRBRExpression (all optional)
+	version_date   TEXT,
+	version_number TEXT,
+	version_label  TEXT,
+	language       TEXT,
+
+	-- Publication (all optional)
+	pub_name   TEXT,
+	pub_date   TEXT,
+	pub_number TEXT,
+
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS files_user_id     ON files(user_id);
+CREATE INDEX IF NOT EXISTS files_document_id ON files(document_id);
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
 	key        TEXT PRIMARY KEY,
@@ -59,7 +95,6 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 	response   TEXT NOT NULL DEFAULT '',
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS idempotency_keys_user ON idempotency_keys(user_id);
 
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
@@ -70,13 +105,11 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
 	enabled    INTEGER NOT NULL DEFAULT 1,
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE TABLE IF NOT EXISTS webhook_endpoint_events (
 	endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
 	event       TEXT NOT NULL,
 	PRIMARY KEY (endpoint_id, event)
 );
-
 CREATE TABLE IF NOT EXISTS webhook_events (
 	id          TEXT PRIMARY KEY,
 	endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
@@ -86,24 +119,21 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 	attempts    INTEGER NOT NULL DEFAULT 0,
 	created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS webhook_events_endpoint ON webhook_events(endpoint_id);
-CREATE INDEX IF NOT EXISTS webhook_events_status ON webhook_events(status);
+CREATE INDEX IF NOT EXISTS webhook_events_status   ON webhook_events(status);
 `
 
 func Open(path string) (*sqlx.DB, error) {
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err = os.Stat(dir); os.IsNotExist(err) {
 			return nil, fmt.Errorf("directory %q does not exist", dir)
 		}
 	}
-
 	db, err := sqlx.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-
 	if _, err = db.Exec(`
 		PRAGMA journal_mode=WAL;
 		PRAGMA synchronous=NORMAL;
@@ -113,10 +143,8 @@ func Open(path string) (*sqlx.DB, error) {
 	`); err != nil {
 		return nil, fmt.Errorf("apply pragmas: %w", err)
 	}
-
 	if _, err = db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-
 	return db, nil
 }

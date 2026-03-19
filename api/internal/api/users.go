@@ -28,6 +28,11 @@ type changePasswordRequest struct {
 
 // handleRequestPasswordReset godoc
 // @Summary     Request password reset token
+// @Description Always returns 200 regardless of whether the email exists,
+//
+//	to prevent user enumeration. The token is only usable if the
+//	email is registered.
+//
 // @Tags        auth
 // @Accept      json
 // @Produce     json
@@ -35,8 +40,6 @@ type changePasswordRequest struct {
 // @Param       Idempotency-Key header string               false "Idempotency key"
 // @Success     200 {object} passwordResetResponse
 // @Failure     400 {object} apiErrorResponse
-// @Failure     404 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /tokens/password-reset [post]
 func (s *Server) handleRequestPasswordReset(c echo.Context) error {
 	var body passwordResetRequest
@@ -46,7 +49,13 @@ func (s *Server) handleRequestPasswordReset(c echo.Context) error {
 
 	u, err := s.users.GetByEmail(body.Email)
 	if err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such user with email: "+body.Email, "email")
+		// Email not found — return a dummy 200 so callers cannot enumerate users.
+		// The token in the response is random but not stored; it will fail at PATCH.
+		fakeToken, _, _ := newRefreshToken()
+		return c.JSON(http.StatusOK, passwordResetResponse{
+			Object:     "token.password_reset",
+			ResetToken: fakeToken,
+		})
 	}
 
 	token, tokenHash, err := newRefreshToken()
@@ -79,7 +88,6 @@ func (s *Server) handleRequestPasswordReset(c echo.Context) error {
 // @Success     200 {object} deletedResponse
 // @Failure     400 {object} apiErrorResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /tokens/password-reset [patch]
 func (s *Server) handleChangePassword(c echo.Context) error {
 	var body changePasswordRequest
@@ -87,15 +95,19 @@ func (s *Server) handleChangePassword(c echo.Context) error {
 		return errorf(http.StatusBadRequest, "parameter_missing", "invalid request body")
 	}
 	if body.ResetToken == "" {
-		return errorf(http.StatusBadRequest, "parameter_missing", "reset_token is required", "reset_token")
+		return errorf(http.StatusBadRequest, "parameter_missing",
+			"reset_token is required", "reset_token")
 	}
 	if body.NewPassword == "" {
-		return errorf(http.StatusBadRequest, "parameter_missing", "new_password is required", "new_password")
+		return errorf(http.StatusBadRequest, "parameter_missing",
+			"new_password is required", "new_password")
 	}
 
 	r, err := s.resets.GetByTokenHash(hashToken(body.ResetToken))
 	if err != nil {
-		return errorf(http.StatusUnauthorized, "invalid_token", "invalid or expired reset token", "reset_token")
+		// Covers both "not found" and "fake token from dummy response above".
+		return errorf(http.StatusUnauthorized, "invalid_token",
+			"invalid or expired reset token", "reset_token")
 	}
 
 	newHash, err := auth.HashPassword(body.NewPassword)
@@ -106,7 +118,6 @@ func (s *Server) handleChangePassword(c echo.Context) error {
 	if err = s.users.UpdatePassword(r.UserID, newHash); err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-
 	if err = s.resets.Delete(r.ID); err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}

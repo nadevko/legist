@@ -9,18 +9,18 @@ import (
 
 type contextKey string
 
-const (
-	UserIDKey contextKey = "userID"
-	Version              = "v1-alpha"
-)
+const UserIDKey contextKey = "userID"
 
-// AuthError — структурированная ошибка авторизации.
-// Экспортирована чтобы errorHandler в пакете api мог её распознать.
+const Version = "v1-alpha"
+
+// AuthError is a structured authentication error.
+// Exported so errorHandler in the api package can detect and handle it.
 type AuthError struct {
 	Code    string
 	Message string
 }
 
+// Middleware validates the Bearer token and stores the user ID in the context.
 func Middleware(secret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -44,7 +44,7 @@ func Middleware(secret string) echo.MiddlewareFunc {
 	}
 }
 
-// UserID достаёт userID из контекста Echo.
+// UserID extracts the authenticated user ID from the Echo context.
 func UserID(c echo.Context) string {
 	v, _ := c.Get(string(UserIDKey)).(string)
 	return v

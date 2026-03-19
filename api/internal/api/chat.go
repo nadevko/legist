@@ -24,8 +24,9 @@ type chatSource struct {
 }
 
 // handleChat godoc
-// @Summary     Ask a question about laws
+// @Summary     Ask a question about laws (RAG-based Q&A)
 // @Tags        chat
+// @Security    BearerAuth
 // @Accept      json
 // @Produce     json
 // @Produce     text/event-stream
@@ -42,7 +43,7 @@ func (s *Server) handleChat(c echo.Context) error {
 	}
 
 	if c.Request().Header.Get("Accept") == "text/event-stream" {
-		// TODO: SSE streaming от Ollama
+		// TODO: SSE streaming from Ollama
 		return nil
 	}
 

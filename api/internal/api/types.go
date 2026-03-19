@@ -10,7 +10,7 @@ import (
 	"github.com/nadevko/legist/internal/pagination"
 )
 
-// — Error types —
+// --- error types ---
 
 type apiError struct {
 	Type    string  `json:"type"`
@@ -53,7 +53,6 @@ func errorHandler(err error, c echo.Context) {
 		Object: "error",
 		Error:  apiError{Type: errTypeServer, Code: "server_error", Message: "internal error"},
 	}
-
 	if he, ok := err.(*echo.HTTPError); ok {
 		code = he.Code
 		errType := httpCodeToType(code)
@@ -68,7 +67,6 @@ func errorHandler(err error, c echo.Context) {
 			resp.Error = apiError{Type: errType, Code: httpCodeToCode(code), Message: "internal error"}
 		}
 	}
-
 	c.JSON(code, resp)
 }
 
@@ -106,7 +104,7 @@ func httpCodeToCode(code int) string {
 	}
 }
 
-// — Deleted response —
+// --- deleted response ---
 
 type deletedResponse struct {
 	ID      string `json:"id"`
@@ -118,7 +116,7 @@ func deleted(id, object string) deletedResponse {
 	return deletedResponse{ID: id, Object: object, Deleted: true}
 }
 
-// — List response —
+// --- list response ---
 
 type listResponse[T any] struct {
 	Object     string `json:"object"` // "list"
@@ -127,11 +125,7 @@ type listResponse[T any] struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-func newList[T any](data []T, hasMore bool) listResponse[T] {
-	return listResponse[T]{Object: "list", Data: data, HasMore: hasMore}
-}
-
-// — Pagination —
+// --- pagination ---
 
 type listParams struct {
 	Limit         int    `query:"limit"`
@@ -153,7 +147,7 @@ func (p *listParams) toStore() pagination.Params {
 	}
 }
 
-// — Resource responses —
+// --- resource responses ---
 
 type userResponse struct {
 	ID      string `json:"id"`
@@ -171,14 +165,20 @@ type sessionResponse struct {
 }
 
 type fileResponse struct {
-	ID       string  `json:"id"`
-	Object   string  `json:"object"` // "file"
-	Name     string  `json:"name"`
-	MimeType string  `json:"mime_type"`
-	Size     int64   `json:"size"`
-	Status   string  `json:"status"`
-	UserID   *string `json:"user_id,omitempty"`
-	Created  int64   `json:"created"`
+	ID         string  `json:"id"`
+	Object     string  `json:"object"` // "file"
+	DocumentID *string `json:"document_id,omitempty"`
+	UserID     *string `json:"user_id,omitempty"`
+	Name       string  `json:"name"`
+	MimeType   string  `json:"mime_type"`
+	Size       int64   `json:"size"`
+	Status     string  `json:"status"`
+	// Expression-level — may be null if not yet extracted
+	VersionDate   *string `json:"version_date,omitempty"`
+	VersionNumber *string `json:"version_number,omitempty"`
+	VersionLabel  *string `json:"version_label,omitempty"`
+	Language      *string `json:"language,omitempty"`
+	Created       int64   `json:"created"`
 }
 
 type tokenResponse struct {

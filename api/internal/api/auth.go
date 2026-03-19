@@ -45,7 +45,6 @@ type updateUserRequest struct {
 // @Success     201 {object} userResponse
 // @Failure     400 {object} apiErrorResponse
 // @Failure     409 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /users [post]
 func (s *Server) handleRegister(c echo.Context) error {
 	var body registerRequest
@@ -66,7 +65,10 @@ func (s *Server) handleRegister(c echo.Context) error {
 
 	u := &store.User{ID: newID("user"), Email: body.Email, Password: hash}
 	if err = s.users.Create(u); err != nil {
-		return errorf(http.StatusConflict, "email_taken", "email already taken", "email")
+		if store.IsUniqueViolation(err) {
+			return errorf(http.StatusConflict, "email_taken", "email already taken", "email")
+		}
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
 	return c.JSON(http.StatusCreated, userResponse{
@@ -86,7 +88,6 @@ func (s *Server) handleRegister(c echo.Context) error {
 // @Success     200 {object} tokenResponse
 // @Failure     400 {object} apiErrorResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /sessions [post]
 func (s *Server) handleLogin(c echo.Context) error {
 	var body loginRequest
@@ -135,17 +136,18 @@ func (s *Server) handleLogin(c echo.Context) error {
 // @Success     200 {object} tokenResponse
 // @Failure     400 {object} apiErrorResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /tokens/refresh [post]
 func (s *Server) handleRefresh(c echo.Context) error {
 	var body refreshRequest
 	if err := c.Bind(&body); err != nil || body.RefreshToken == "" {
-		return errorf(http.StatusBadRequest, "parameter_missing", "refresh_token is required", "refresh_token")
+		return errorf(http.StatusBadRequest, "parameter_missing",
+			"refresh_token is required", "refresh_token")
 	}
 
 	sess, err := s.sessions.GetByTokenHash(hashToken(body.RefreshToken))
 	if err != nil {
-		return errorf(http.StatusUnauthorized, "invalid_token", "invalid or expired refresh token", "refresh_token")
+		return errorf(http.StatusUnauthorized, "invalid_token",
+			"invalid or expired refresh token", "refresh_token")
 	}
 
 	accessToken, err := auth.NewAccessToken(sess.UserID, s.cfg.JWTSecret)
@@ -160,18 +162,23 @@ func (s *Server) handleRefresh(c echo.Context) error {
 }
 
 // handleLogout godoc
-// @Summary     Logout
+// @Summary     Logout (delete session)
 // @Tags        auth
 // @Security    BearerAuth
 // @Param       id              path   string true  "Session ID"
 // @Param       Idempotency-Key header string false "Idempotency key"
 // @Success     200 {object} deletedResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
+// @Failure     404 {object} apiErrorResponse
 // @Router      /sessions/{id} [delete]
 func (s *Server) handleLogout(c echo.Context) error {
 	id := c.Param("id")
 	if err := s.sessions.DeleteByID(id, auth.UserID(c)); err != nil {
+		// DeleteByID uses WHERE id=? AND user_id=? — 0 rows affected = not found or not owner.
+		// We return 404 in both cases to avoid leaking session existence.
+		if errors.Is(err, store.ErrNotOwner) {
+			return errorf(http.StatusNotFound, "resource_missing", "no such session: "+id)
+		}
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	return c.JSON(http.StatusOK, deleted(id, "session"))
@@ -187,7 +194,6 @@ func (s *Server) handleLogout(c echo.Context) error {
 // @Param       ending_before  query string false "Cursor"
 // @Success     200 {object} listResponse[sessionResponse]
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /sessions [get]
 func (s *Server) handleListSessions(c echo.Context) error {
 	p, err := bindListParams(c)
@@ -198,7 +204,8 @@ func (s *Server) handleListSessions(c echo.Context) error {
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.JSON(http.StatusOK, listResult(sessions, p.Limit, toSessionResponse, func(s store.Session) string { return s.ID }))
+	return c.JSON(http.StatusOK, listResult(sessions, p.Limit,
+		toSessionResponse, func(s store.Session) string { return s.ID }))
 }
 
 // handleGetUser godoc
@@ -208,11 +215,15 @@ func (s *Server) handleListSessions(c echo.Context) error {
 // @Param       id path string true "User ID or 'me'"
 // @Produce     json
 // @Success     200 {object} userResponse
-// @Failure     401 {object} apiErrorResponse
+// @Failure     403 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
 // @Router      /users/{id} [get]
 func (s *Server) handleGetUser(c echo.Context) error {
 	id := resolveUserID(c)
+	// Users can only read their own profile.
+	if err := requireSelf(c, id); err != nil {
+		return err
+	}
 	u, err := s.users.GetByID(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+id)
@@ -224,7 +235,7 @@ func (s *Server) handleGetUser(c echo.Context) error {
 }
 
 // handleUpdateUser godoc
-// @Summary     Update user
+// @Summary     Update user email
 // @Tags        users
 // @Security    BearerAuth
 // @Param       id              path   string            true  "User ID or 'me'"
@@ -234,13 +245,15 @@ func (s *Server) handleGetUser(c echo.Context) error {
 // @Produce     json
 // @Success     200 {object} userResponse
 // @Failure     400 {object} apiErrorResponse
-// @Failure     401 {object} apiErrorResponse
+// @Failure     403 {object} apiErrorResponse
 // @Failure     404 {object} apiErrorResponse
 // @Failure     409 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /users/{id} [patch]
 func (s *Server) handleUpdateUser(c echo.Context) error {
 	id := resolveUserID(c)
+	if err := requireSelf(c, id); err != nil {
+		return err
+	}
 
 	var body updateUserRequest
 	if err := c.Bind(&body); err != nil {
@@ -268,24 +281,39 @@ func (s *Server) handleUpdateUser(c echo.Context) error {
 // @Param       id              path   string true  "User ID or 'me'"
 // @Param       Idempotency-Key header string false "Idempotency key"
 // @Success     200 {object} deletedResponse
+// @Failure     403 {object} apiErrorResponse
 // @Failure     401 {object} apiErrorResponse
-// @Failure     500 {object} apiErrorResponse
 // @Router      /users/{id} [delete]
 func (s *Server) handleDeleteUser(c echo.Context) error {
 	id := resolveUserID(c)
+	if err := requireSelf(c, id); err != nil {
+		return err
+	}
 	if err := s.users.Delete(id); err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	return c.JSON(http.StatusOK, deleted(id, "user"))
 }
 
-// resolveUserID возвращает userID из пути или из токена если id == "me".
+// --- helpers ---
+
+// resolveUserID returns the user ID from path param, substituting the
+// authenticated user's ID when param is empty or "me".
 func resolveUserID(c echo.Context) string {
 	id := c.Param("id")
 	if id == "" || id == "me" {
 		return auth.UserID(c)
 	}
 	return id
+}
+
+// requireSelf returns 403 if the authenticated user is trying to act on
+// another user's account. We return 404 shape to avoid leaking user existence.
+func requireSelf(c echo.Context, targetID string) error {
+	if auth.UserID(c) != targetID {
+		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+targetID)
+	}
+	return nil
 }
 
 func toUserResponse(u store.User) userResponse {

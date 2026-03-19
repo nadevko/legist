@@ -24,13 +24,14 @@ type Server struct {
 	sessions    *store.SessionStore
 	resets      *store.PasswordResetStore
 	files       *store.FileStore
+	documents   *store.DocumentStore
 	idempotency *store.IdempotencyStore
 	webhooks    *store.WebhookStore
 	dispatcher  *webhook.Dispatcher
 	broker      *sse.Broker
 }
 
-// NewServer creates and configures a new HTTP server with all middleware and routes.
+// NewServer creates and configures the HTTP server.
 func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 	webhookStore := store.NewWebhookStore(db)
 	s := &Server{
@@ -40,6 +41,7 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 		sessions:    store.NewSessionStore(db),
 		resets:      store.NewPasswordResetStore(db),
 		files:       store.NewFileStore(db),
+		documents:   store.NewDocumentStore(db),
 		idempotency: store.NewIdempotencyStore(db),
 		webhooks:    webhookStore,
 		dispatcher:  webhook.NewDispatcher(webhookStore),
@@ -67,7 +69,6 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 	return s
 }
 
-// registerRoutes sets up all API routes.
 func (s *Server) registerRoutes() {
 	e := s.e
 
@@ -75,15 +76,11 @@ func (s *Server) registerRoutes() {
 		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
 	})
 
-	// API routes with base path
 	api := e.Group(s.cfg.BasePath)
 
-	// Redirect /api/ to /api/swagger/
 	api.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
 	})
-
-	// Swagger routes (public) - wildcard catches /api/swagger/ and everything under it
 	api.GET("/swagger/*", echoSwagger.EchoWrapHandler(func(c *echoSwagger.Config) {
 		c.URLs = []string{"v1-alpha.json"}
 	}))
@@ -102,6 +99,7 @@ func (s *Server) registerRoutes() {
 	// protected
 	p := api.Group("", auth.Middleware(s.cfg.JWTSecret))
 
+	// users
 	p.GET("/me", s.handleGetUser)
 	p.PATCH("/me", s.handleUpdateUser)
 	p.DELETE("/me", s.handleDeleteUser)
@@ -109,14 +107,31 @@ func (s *Server) registerRoutes() {
 	p.PATCH("/users/:id", s.handleUpdateUser)
 	p.DELETE("/users/:id", s.handleDeleteUser)
 
+	// sessions
 	p.GET("/sessions", s.handleListSessions)
 	p.DELETE("/sessions/:id", s.handleLogout)
 
+	// files
+	// POST /files                       — creates new Document automatically
+	// POST /files (document_id present) — alias → POST /documents/:id/files
+	// GET  /files (document_id present) — alias → GET  /documents/:id/files
 	p.GET("/files", s.handleListFiles)
 	p.GET("/files/:id", s.handleGetFile)
+	p.GET("/files/:id/parsed", s.handleGetParsed)
 	p.POST("/files", s.handleUploadFile)
+	p.PATCH("/files/:id", s.handlePatchFile)
 	p.DELETE("/files/:id", s.handleDeleteFile)
 
+	// documents — canonical endpoints; /files aliases forward here
+	p.POST("/documents", s.handleCreateDocument)
+	p.GET("/documents", s.handleListDocuments)
+	p.GET("/documents/:id", s.handleGetDocument)
+	p.PATCH("/documents/:id", s.handleUpdateDocument)
+	p.DELETE("/documents/:id", s.handleDeleteDocument)
+	p.GET("/documents/:id/files", s.handleListDocumentFiles)   // canonical list versions
+	p.POST("/documents/:id/files", s.handleUploadDocumentFile) // canonical add version
+
+	// webhooks
 	p.POST("/webhooks", s.handleCreateWebhook)
 	p.GET("/webhooks", s.handleListWebhooks)
 	p.GET("/webhooks/:id", s.handleGetWebhook)
@@ -124,7 +139,34 @@ func (s *Server) registerRoutes() {
 	p.PATCH("/webhooks/:id", s.handleUpdateWebhook)
 	p.DELETE("/webhooks/:id", s.handleDeleteWebhook)
 
+	// chat
 	p.POST("/chat", s.handleChat)
+}
+
+// LoadResource implements middleware.ExpandLoader.
+func (s *Server) LoadResource(resource, id string) any {
+	switch resource {
+	case "user":
+		u, err := s.users.GetByID(id)
+		if err != nil {
+			return nil
+		}
+		return toUserResponse(*u)
+	case "file":
+		f, err := s.files.GetByID(id)
+		if err != nil {
+			return nil
+		}
+		return toFileResponse(*f)
+	case "document":
+		d, err := s.documents.GetByID(id)
+		if err != nil {
+			return nil
+		}
+		return toDocumentResponse(*d)
+	default:
+		return nil
+	}
 }
 
 // Start begins listening for HTTP requests.

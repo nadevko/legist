@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 
@@ -19,7 +18,7 @@ func (s *IdempotencyStore) Get(key, userID string) (*IdempotencyKey, error) {
 	err := s.db.Get(&ik,
 		`SELECT * FROM idempotency_keys
 		 WHERE key = ? AND user_id = ?
-		 AND created_at > datetime('now', ? )`,
+		 AND created_at > datetime('now', ?)`,
 		key, userID, fmt.Sprintf("-%d hours", idempotencyTTLHours),
 	)
 	if err != nil {
@@ -28,7 +27,8 @@ func (s *IdempotencyStore) Get(key, userID string) (*IdempotencyKey, error) {
 	return &ik, nil
 }
 
-var ErrConflict = errors.New("idempotency key in use")
+// ErrIdempotencyConflict is returned when a key is already in use for a different request.
+var ErrIdempotencyConflict = errors.New("idempotency key in use")
 
 func (s *IdempotencyStore) Lock(key, userID, method, path string) error {
 	_, err := s.db.Exec(
@@ -48,14 +48,15 @@ func (s *IdempotencyStore) Lock(key, userID, method, path string) error {
 		return fmt.Errorf("get locked key: %w", err)
 	}
 
+	// Already completed — caller will replay from cache.
 	if ik.Response != "" {
 		return nil
 	}
+	// In-flight for same method+path — ok to proceed.
 	if ik.Status == 0 && ik.Method == method && ik.Path == path {
 		return nil
 	}
-
-	return ErrConflict
+	return ErrIdempotencyConflict
 }
 
 func (s *IdempotencyStore) Set(ik *IdempotencyKey) error {
@@ -68,8 +69,4 @@ func (s *IdempotencyStore) Set(ik *IdempotencyKey) error {
 		return fmt.Errorf("set idempotency key: %w", err)
 	}
 	return nil
-}
-
-func IsNotFound(err error) bool {
-	return errors.Is(err, sql.ErrNoRows)
 }

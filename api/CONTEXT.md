@@ -26,7 +26,8 @@ legist/
 │       │   ├── server.go         # Server struct, NewServer, registerRoutes
 │       │   ├── auth.go           # /users, /sessions, /tokens handlers
 │       │   ├── users.go          # password reset handlers
-│       │   ├── files.go          # file upload, list, get, delete
+│       │   ├── files.go          # file upload, list, get, patch, delete, parsed
+│       │   ├── documents.go      # document CRUD handlers
 │       │   ├── webhooks.go       # webhook endpoint CRUD + events
 │       │   ├── chat.go           # /chat handler (stub)
 │       │   ├── health.go         # /health
@@ -45,9 +46,11 @@ legist/
 │       │   └── config.go         # Config struct, Load()
 │       ├── pagination/           # cursor-based pagination
 │       │   └── pagination.go     # Params, Page, Response, NewResponse
-│       ├── parser/               # document parsing
-│       │   ├── types.go          # Document, Section, Flatten, FlattenLeaves
+│       ├── parser/               # document parsing and metadata extraction
+│       │   ├── types.go          # ParsedFile, ParsedMeta, Section, AKN types
 │       │   ├── parser.go         # Parser interface, New(mime), ParseFile(path, mime)
+│       │   ├── pipeline.go       # Run() — full parse+LLM+write pipeline with SSE progress
+│       │   ├── meta.go           # ExtractMeta, LLM prompt, field validation, DeriveNPALevel
 │       │   ├── docx.go           # fumiama/go-docx parser
 │       │   ├── pdf.go            # pdftotext via exec
 │       │   ├── validate.go       # ValidateReader, Validate (magic bytes, size)
@@ -56,10 +59,13 @@ legist/
 │       │   └── broker.go         # Broker, Subscribe, Publish, Stream, Format
 │       ├── store/                # sqlx stores per resource
 │       │   ├── db.go             # Open(path), schema, WAL pragmas
-│       │   ├── models.go         # User, Session, File, PasswordReset, IdempotencyKey, WebhookEndpoint, WebhookEvent
+│       │   ├── models.go         # User, Session, File, Document, PasswordReset,
+│       │   │                     # IdempotencyKey, WebhookEndpoint, WebhookEvent
+│       │   │                     # + ErrDuplicate, ErrNotOwner, IsUniqueViolation
 │       │   ├── users.go          # UserStore: Create, GetByID, GetByEmail, UpdateEmail, UpdatePassword, Delete
 │       │   ├── sessions.go       # SessionStore: Create, GetByTokenHash, ListByUser, DeleteByID, DeleteAllByUser
-│       │   ├── files.go          # FileStore: Create, GetByID, List(filter, params), UpdateStatus, Delete
+│       │   ├── files.go          # FileStore: Create, GetByID, List(filter, params), UpdateStatus, UpdateMeta, Delete
+│       │   ├── documents.go      # DocumentStore: Create, GetByID, List, ApplyUpdate, Delete
 │       │   ├── password_resets.go# PasswordResetStore: Create, GetByTokenHash, Delete
 │       │   ├── idempotency.go    # IdempotencyStore: Get, Lock, Set
 │       │   └── webhooks.go       # WebhookStore: endpoint CRUD, events CRUD, ListEndpointsByEvent
@@ -88,15 +94,21 @@ legist/
 
 ### File Storage
 - Originals: `data/files/{file_id}/{filename}`
-- Parsed JSON (planned): `data/files/{file_id}/parsed.json`
+- Parsed JSON: `data/files/{file_id}/parsed.json`
 - Public laws (RAG base): `files.user_id IS NULL` in DB, populated by Python scripts
 - User files: `files.user_id = <user_id>`
 
 ### SSE Events
 All SSE events have shape: `{type: string, data: {...}}`
-- `progress` — processing started
-- `done` — completed successfully  
-- `failed` — failed with error
+
+Progress stages during file processing:
+- `parsing_started` — structure parsing started/completed (`sections_found` field)
+- `llm_requested` — metadata extraction request sent (`chars` field)
+- `llm_skipped` — LLM not needed, all metadata provided explicitly
+- `llm_done` — LLM responded (`meta_score`, `meta_ok` fields)
+- `saving` — writing parsed.json
+- `done` — completed successfully
+- `failed` — failed with error (`error`, `missing_fields` fields)
 
 ### Idempotency
 - Required for all POST requests
@@ -116,31 +128,51 @@ All SSE events have shape: `{type: string, data: {...}}`
 - Validate magic bytes before saving to disk
 - Max file size: 50MB
 - DOCX: Word heading styles (`Heading 1/2/3`, `Заголовок 1/2/3`) define hierarchy
-- PDF: regex patterns on pdftotext output define hierarchy
+- PDF: regex patterns on pdftotext output define hierarchy; path passed directly to avoid stdin issues
 - Section IDs: hierarchical `s1`, `s1.2`, `s1.2.3`
 - `Flatten()` — all sections DFS (for embeddings)
 - `FlattenLeaves()` — leaf sections only (for Qdrant chunking)
-Generated via `newID("prefix")` in `internal/api/id.go`:
-```
-file_a1b2c3d4e5f6   — files
-user_a1b2c3d4e5f6   — users
-sess_a1b2c3d4e5f6   — sessions
-pwdr_a1b2c3d4e5f6   — password resets
-whep_a1b2c3d4e5f6   — webhook endpoints
-evt_<unix_nano>     — webhook events (dispatcher)
-```
-12 hex chars after prefix, sliced from UUID without dashes.
+- `MatchKey()` — stable diff key: `section_type:num` (survives renumbering)
+
+### AKN Metadata
+Documents follow Akoma Ntoso Work/Expression model:
+
+**Work-level** (stored on `documents` table, required for diff):
+- `subtype` — закон|кодекс|декрет|указ|постановление|приказ|решение|конституция|иное
+- `number` — official document number, e.g. "296-З"
+- `author` — issuing body, e.g. "Парламент"
+- `date` — adoption date YYYY-MM-DD
+- `npa_level` — derived deterministically from subtype+author (0–9)
+
+**Expression-level** (stored on `files` table, optional):
+- `version_date`, `version_number`, `version_label` — редакция
+- `language` — rus|bel
+- `pub_name`, `pub_date`, `pub_number` — publication info
+
+**Enrichment** (stored in `parsed.json` only, not DB columns):
+- `lifecycle` — generation/amendment/repeal events
+- `passive_modifications` — what other acts changed this document
+- `references` — TLC ontological entities
+- `keywords` — subject tags
+
+If metadata fields are not supplied at upload time, `qwen2.5:3b` attempts extraction from the first+last N chars of document text (`LLM_METADATA_WINDOW`). Required Work fields (subtype, number, date) missing after all retries → `file.status = failed`.
 
 ### API Style — Stripe
 - Resources plural, ownership via JWT (no `/me/resource` paths, only `/me` alias)
 - Every response: `id`, `object` (type string), `created` (unix timestamp)
-- List: `{object: "list", data: [...], has_more: bool}`
+- List: `{object: "list", data: [...], has_more: bool, next_cursor?: string}`
 - Delete: `{id, object, deleted: true}` with HTTP 200
 - Errors: `{object: "error", error: {type, code, message, param?}}`
 - Cursor pagination: `starting_after` / `ending_before` query params
 - `expand[]=resource` — expand related objects inline
 - `Idempotency-Key` header required for POST
-- `Accept` header controls format AND mode (see below)
+
+### Ownership and Security
+- Resources return 404 (not 403) when they exist but belong to another user
+- Public documents (`user_id IS NULL`) are readable by all but not mutable
+- `DELETE /sessions/:id` uses `WHERE id=? AND user_id=?` — 0 rows = 404
+- `POST /tokens/password-reset` always returns 200 regardless of email existence (anti-enumeration)
+- `POST /users` returns 409 only on UNIQUE violation, other errors return 500
 
 ### Response Headers
 - `Request-Id` — every response
@@ -165,12 +197,14 @@ application/vnd...docx — file download
 ### Database
 - SQLite, WAL mode, `foreign_keys=ON`, `busy_timeout=5000`
 - 3NF — no derived fields, no JSON columns (webhook events use separate table)
-- Public laws: `files.user_id IS NULL`
+- Public laws: `files.user_id IS NULL`, `documents.user_id IS NULL`
 - Cursor pagination: composite `(created_at, id)` cursor in all list queries
+- `ErrDuplicate` — returned on UNIQUE constraint violation (detected via error string)
+- `ErrNotOwner` — returned when DELETE/UPDATE affects 0 rows due to ownership mismatch
 
-### Diff and RAG Architecture
+### Diff and RAG Architecture (planned)
 - **Vectors (Qdrant)** — for RAG search only, not for diffing
-- **Diff** — structural comparison of `[]Section` trees, matched by `Label`
+- **Diff** — structural comparison of `[]Section` trees, matched by `MatchKey()` (type:num)
 - Word-level diff via `go-diff` for changed sections
 - AI inference sequential (semaphore=1 for Ollama), RAG queries parallel
 - Parsed `Document{}` saved as `parsed.json` to avoid re-parsing on each diff
@@ -178,8 +212,9 @@ application/vnd...docx — file download
 ### object Field Values
 ```
 "user"                 — User
-"session"              — Session  
+"session"              — Session
 "file"                 — File
+"document"             — Document (AKN Work-level entity)
 "token"                — access/refresh token pair
 "token.password_reset" — password reset token
 "webhook.endpoint"     — WebhookEndpoint
@@ -188,19 +223,18 @@ application/vnd...docx — file download
 "error"                — error response
 "chat.completion"      — chat response (planned)
 "diff"                 — diff result (planned)
-"document"             — document group (planned)
-"document.version"     — version within document (planned)
 ```
 
-### NPA Hierarchy Levels (Qdrant payload)
+### NPA Hierarchy Levels (npa_level)
+Derived deterministically from `subtype` + `author` via `DeriveNPALevel()`:
 ```
 0 — Constitution
 1 — Republican referendum decisions
-2 — Laws
-3 — Presidential decrees and edicts
-4 — Council of Ministers resolutions
+2 — Laws (закон, кодекс)
+3 — Presidential decrees and edicts (декрет, указ)
+4 — Council of Ministers resolutions (постановление, автор: СовМин)
 5 — Parliament/Supreme Court/Prosecutor General NPAs
-6 — Ministry NPAs
+6 — Ministry NPAs (постановление/приказ, автор: министерство/комитет)
 7 — Local NPAs
 8 — Other regulatory bodies
 9 — Technical NPAs
@@ -214,7 +248,7 @@ GET    /swagger/*
 POST   /users                     — register
 POST   /sessions                  — login → {access_token, refresh_token}
 POST   /tokens/refresh
-POST   /tokens/password-reset     — returns reset_token directly (no email)
+POST   /tokens/password-reset     — always 200 (anti-enumeration), token usable only if email exists
 PATCH  /tokens/password-reset     — change password using reset_token
 ```
 
@@ -224,23 +258,34 @@ GET    /me                        — alias for GET /users/:currentUserID
 PATCH  /me
 DELETE /me
 
-GET    /users/:id
-PATCH  /users/:id                 — update email
-DELETE /users/:id
+GET    /users/:id                 — own profile only (404 for others)
+PATCH  /users/:id                 — own profile only
+DELETE /users/:id                 — own profile only
 
 GET    /sessions                  — list active sessions
-DELETE /sessions/:id              — logout
+DELETE /sessions/:id              — logout (404 if not found or not owner)
 
-GET    /files                     — own files (default) or ?owner=public for laws
+GET    /documents                 — list own documents; ?owner=public for public laws
+POST   /documents                 — create document manually (409 on duplicate identity)
+GET    /documents/:id
+PATCH  /documents/:id             — update Work-level fields
+DELETE /documents/:id
+
+GET    /documents/:id/files       — list versions (canonical); alias: GET /files?document_id=:id
+POST   /documents/:id/files       — add version (canonical); alias: POST /files with document_id form field
+
+GET    /files                     — own files; ?document_id= forwards to /documents/:id/files
+POST   /files                     — upload + create new Document (409 on duplicate identity)
 GET    /files/:id                 — metadata / download / SSE (via Accept)
-POST   /files                     — upload pdf/docx (sync or async via Accept)
-DELETE /files/:id
+PATCH  /files/:id                 — update Expression-level fields (version_date, language, pub_*, etc.)
+DELETE /files/:id                 — 409 if status=processing
+GET    /files/:id/parsed          — parsed.json content (409 if not done, 404 if file missing)
 
-POST   /webhooks
+POST   /webhooks                  — URL and events validated; events must be from known list
 GET    /webhooks
 GET    /webhooks/:id
 GET    /webhooks/:id/events       — delivery history
-PATCH  /webhooks/:id
+PATCH  /webhooks/:id              — update url, events, enabled toggle
 DELETE /webhooks/:id
 
 POST   /chat                      — RAG-based Q&A (stub)
@@ -248,20 +293,9 @@ POST   /chat                      — RAG-based Q&A (stub)
 
 ### Planned (not yet implemented)
 ```
-POST   /diffs
-GET    /diffs
+POST   /diffs                     — start diff of two files
 GET    /diffs/:id                 — status + SSE stream
 GET    /diffs/:id/report          — JSON / DOCX / AKN XML via Accept
-
-POST   /documents
-GET    /documents
-GET    /documents/:id
-PATCH  /documents/:id
-DELETE /documents/:id
-POST   /documents/:id/versions
-GET    /documents/:id/versions
-GET    /documents/:id/versions/:num
-DELETE /documents/:id/versions/:num
 ```
 
 ## File Processing Pipeline
@@ -270,18 +304,36 @@ DELETE /documents/:id/versions/:num
 POST /files (multipart)
   → magic bytes validation (before saving)
   → save to data/files/{file_id}/{filename}
-  → store File{status: "pending"}
+  → create Document{} if new (Work-level fields from form or empty)
+  → store File{status: "pending", document_id}
   → dispatch webhook: file.created
-  → go parseFile()
+  → go processFile(file, document)
       → UpdateStatus("processing")
-      → SSE publish: progress
-      → parser.ParseFile(path, mime)  →  Document{Sections[]}
+      → SSE: parsing_started
+      → parser.ParseFile(path, mime) → RawDocument{Sections[]}
           DOCX: fumiama/go-docx (heading styles → hierarchy)
-          PDF:  pdftotext via exec (regex patterns → hierarchy)
-      → on error: UpdateStatus("failed"), SSE failed, webhook file.failed
-      → TODO: save parsed.json alongside original
+          PDF:  pdftotext path (no stdin — more reliable across poppler versions)
+      → SSE: parsing_started (sections_found)
+      → buildWindows(sections, windowSize) → startWindow, endWindow
+      → needLLM = any required Work field empty OR any Expression field empty
+      → if needLLM:
+          → SSE: llm_requested
+          → go ExtractMeta(startWindow + "---" + endWindow)
+              → qwen2.5:3b via Ollama /api/generate
+              → retry up to MetadataMaxRetries, merge best results
+              → validate each field (length, date format, npaLevel range)
+              → DeriveNPALevel(subtype, author) — always deterministic, never from LLM
+          → SSE: llm_done (meta_score, meta_ok)
+      → else: SSE: llm_skipped
+      → validate required Work fields (subtype, number, date)
+      → on missing: UpdateStatus("failed"), SSE failed, webhook file.failed, return
+      → merge LLM results into Document (known fields win) → UpdateDocument
+      → merge LLM results into File expression fields → UpdateFileMeta
+      → assemble parsed.json: {file_id, document_id, meta, sections, parsed_at, parser_version}
+      → SSE: saving
+      → write data/files/{file_id}/parsed.json
       → UpdateStatus("done")
-      → SSE publish: done
+      → SSE: done
       → dispatch webhook: file.parsed
 ```
 
@@ -289,13 +341,14 @@ Tracking options:
 1. `POST /files` + `Accept: text/event-stream` — sync, stream progress in response
 2. `POST /files` + `Accept: application/json` — async, poll `GET /files/:id`
 3. `GET /files/:id` + `Accept: text/event-stream` — subscribe at any time
-4. Webhooks — `file.parsed` / `file.failed` events
+4. `GET /files/:id/parsed` — fetch final result when done
+5. Webhooks — `file.parsed` / `file.failed` events
 
 ## Diff Pipeline (planned)
 
 ```
 []Section (old doc)  ─┐
-                      ├→ structural diff (match by Label)
+                      ├→ structural diff (match by MatchKey = type:num)
 []Section (new doc)  ─┘
                            ↓
                       []Change{section, old_text, new_text}
@@ -320,7 +373,6 @@ Qdrant payload per chunk:
   "level":   2
 }
 ```
-NPA hierarchy levels: 0=Constitution, 1=Referendum, 2=Laws, 3=Decrees, 4=Council of Ministers, 5=Parliament/Courts, 6=Ministries, 7=Local, 8=Other, 9=Technical
 
 ## Report Format (JSON)
 ```json
@@ -354,7 +406,7 @@ NPA hierarchy levels: 0=Constitution, 1=Referendum, 2=Laws, 3=Decrees, 4=Council
 
 Events: `file.created`, `file.parsed`, `file.failed`, `file.deleted`, `diff.created`, `diff.done`, `diff.failed`, `user.created`, `user.deleted`
 
-Delivery: 3 attempts with exponential backoff (1s, 4s). Signed with `Legist-Signature: sha256=HMAC(secret, body)`. Secret format: `whsec_...`.
+Delivery: 3 attempts with exponential backoff (1s, 4s). Signed with `Legist-Signature: sha256=HMAC(secret, body)`. Secret format: `whsec_...`. Enable/disable via `PATCH /webhooks/:id` with `{"enabled": false/true}`.
 
 ## NixOS Services
 
@@ -394,9 +446,25 @@ ANALYSIS_MODEL=qwen2.5:7b
 LLM_METADATA=ollama
 LLM_ANALYSIS=ollama              # prod: deepseek or anthropic
 
+LLM_METADATA_WINDOW=3000         # chars of document text sent to metadata LLM
+LLM_METADATA_RETRIES=3           # max LLM attempts per file
+
 ANTHROPIC_API_KEY=
 DEEPSEEK_API_KEY=
 ```
+
+## ID Format
+Generated via `newID("prefix")` in `internal/api/id.go`:
+```
+doc_a1b2c3d4e5f6    — documents
+file_a1b2c3d4e5f6   — files
+user_a1b2c3d4e5f6   — users
+sess_a1b2c3d4e5f6   — sessions
+pwdr_a1b2c3d4e5f6   — password resets
+whep_a1b2c3d4e5f6   — webhook endpoints
+evt_<unix_nano>     — webhook events (dispatcher)
+```
+12 hex chars after prefix, sliced from UUID without dashes.
 
 ## Useful Commands
 
