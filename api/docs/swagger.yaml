@@ -1,0 +1,1115 @@
+basePath: /
+definitions:
+  api.apiError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      param:
+        type: string
+      type:
+        type: string
+    type: object
+  api.apiErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/api.apiError'
+      object:
+        description: '"error"'
+        type: string
+    type: object
+  api.changePasswordRequest:
+    properties:
+      new_password:
+        example: newsecret
+        type: string
+      reset_token:
+        example: a3f1...
+        type: string
+    type: object
+  api.chatRequest:
+    properties:
+      message:
+        example: What does the Constitution say about the right to work?
+        type: string
+    type: object
+  api.chatResponse:
+    properties:
+      answer:
+        type: string
+      object:
+        description: '"chat.completion"'
+        type: string
+      sources:
+        items:
+          $ref: '#/definitions/api.chatSource'
+        type: array
+    type: object
+  api.chatSource:
+    properties:
+      article:
+        type: string
+      level:
+        type: integer
+      source:
+        type: string
+      text:
+        type: string
+    type: object
+  api.deletedResponse:
+    properties:
+      deleted:
+        type: boolean
+      id:
+        type: string
+      object:
+        type: string
+    type: object
+  api.fileResponse:
+    properties:
+      created:
+        type: integer
+      id:
+        type: string
+      mime_type:
+        type: string
+      name:
+        type: string
+      object:
+        description: '"file"'
+        type: string
+      size:
+        type: integer
+      status:
+        type: string
+      user_id:
+        type: string
+    type: object
+  api.listResponse-api_fileResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.fileResponse'
+        type: array
+      has_more:
+        type: boolean
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  api.listResponse-api_sessionResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.sessionResponse'
+        type: array
+      has_more:
+        type: boolean
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  api.listResponse-api_webhookEndpointResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.webhookEndpointResponse'
+        type: array
+      has_more:
+        type: boolean
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  api.listResponse-api_webhookEventResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.webhookEventResponse'
+        type: array
+      has_more:
+        type: boolean
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  api.loginRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      password:
+        example: secret
+        type: string
+    type: object
+  api.passwordResetRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    type: object
+  api.passwordResetResponse:
+    properties:
+      object:
+        description: '"token.password_reset"'
+        type: string
+      reset_token:
+        type: string
+    type: object
+  api.refreshRequest:
+    properties:
+      refresh_token:
+        example: a3f1...
+        type: string
+    type: object
+  api.registerRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      password:
+        example: secret
+        type: string
+    type: object
+  api.sessionResponse:
+    properties:
+      created:
+        type: integer
+      expires_at:
+        type: integer
+      id:
+        type: string
+      object:
+        description: '"session"'
+        type: string
+      user_id:
+        type: string
+    type: object
+  api.tokenResponse:
+    properties:
+      access_token:
+        type: string
+      object:
+        description: '"token"'
+        type: string
+      refresh_token:
+        type: string
+    type: object
+  api.updateUserRequest:
+    properties:
+      email:
+        example: new@example.com
+        type: string
+    type: object
+  api.userResponse:
+    properties:
+      created:
+        type: integer
+      email:
+        type: string
+      id:
+        type: string
+      object:
+        description: '"user"'
+        type: string
+    type: object
+  api.webhookEndpointRequest:
+    properties:
+      events:
+        example:
+        - '["file.created"'
+        - '"diff.done"]'
+        items:
+          type: string
+        type: array
+      url:
+        example: https://example.com/webhook
+        type: string
+    type: object
+  api.webhookEndpointResponse:
+    properties:
+      created:
+        type: integer
+      enabled:
+        type: boolean
+      events:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      object:
+        description: '"webhook.endpoint"'
+        type: string
+      url:
+        type: string
+    type: object
+  api.webhookEventResponse:
+    properties:
+      attempts:
+        type: integer
+      created:
+        type: integer
+      endpoint_id:
+        type: string
+      id:
+        type: string
+      object:
+        description: '"webhook.event"'
+        type: string
+      status:
+        type: string
+      type:
+        type: string
+    type: object
+host: legist.nadevko.cc
+info:
+  contact: {}
+  description: |-
+    AI assistant for comparing revisions of legal acts of the Republic of Belarus.
+
+    ## Authentication
+    All endpoints except auth require a Bearer token in the Authorization header.
+    Obtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.
+
+    ## Request IDs
+    Every response includes a `Request-Id` header for debugging.
+
+    ## Idempotency
+    `POST` requests require an `Idempotency-Key` header.
+    Repeating a request with the same key returns the cached response.
+    Keys expire after 24 hours. If a key is reused for a different
+    endpoint, a 422 error is returned.
+
+    ## Pagination
+    List endpoints support cursor-based pagination via `starting_after`
+    and `ending_before` query params. Default limit is 20, max 100.
+    Response includes `has_more: true` if more items exist.
+
+    ## Expanding objects
+    Pass `expand[]=user` (or other resource name) to expand related
+    objects inline instead of returning only their ID.
+
+    ## Content negotiation
+    Use the `Accept` header to control response format and behaviour:
+    - `application/json` — JSON metadata (default)
+    - `text/event-stream` — SSE stream (async progress or sync upload)
+    - `application/pdf`, `application/vnd...docx` — file download
+
+    ## File processing
+    Files are parsed asynchronously after upload. Track progress via:
+    1. **Webhooks** — register an endpoint, receive `file.parsed` event
+    2. **Sync SSE** — `POST /files` with `Accept: text/event-stream`
+    3. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`
+
+    ## Webhooks
+    Register endpoints via `POST /webhooks`. Each delivery is signed
+    with HMAC-SHA256. Verify the `Legist-Signature: sha256=...` header
+    using your endpoint secret. Failed deliveries are retried 3 times
+    with exponential backoff. Inspect history via `GET /webhooks/:id/events`.
+
+    ### Supported events
+    | Event | Description |
+    |-------|-------------|
+    | `file.created` | File uploaded |
+    | `file.parsed` | Parsing succeeded |
+    | `file.failed` | Parsing failed |
+    | `file.deleted` | File deleted |
+    | `diff.created` | Diff started |
+    | `diff.done` | Diff completed |
+    | `diff.failed` | Diff failed |
+    | `user.created` | User registered |
+    | `user.deleted` | User deleted |
+
+    ### Signature verification (Go example)
+    ```go
+    mac := hmac.New(sha256.New, []byte(secret))
+    mac.Write(body)
+    expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+    ok := hmac.Equal([]byte(expected), []byte(signature))
+    ```
+  title: Legist API
+  version: v1-alpha
+paths:
+  /chat:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Question
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.chatRequest'
+      - description: application/json | text/event-stream
+        in: header
+        name: Accept
+        type: string
+      produces:
+      - application/json
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.chatResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Ask a question about laws
+      tags:
+      - chat
+  /files:
+    get:
+      parameters:
+      - description: omit=current user files, public=laws only
+        in: query
+        name: owner
+        type: string
+      - description: 'Filter by status: pending|processing|done|failed'
+        in: query
+        name: status
+        type: string
+      - description: Limit (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 'Cursor: last file ID from previous page'
+        in: query
+        name: starting_after
+        type: string
+      - description: 'Cursor: first file ID from next page'
+        in: query
+        name: ending_before
+        type: string
+      - collectionFormat: csv
+        description: 'Expand related objects: user'
+        in: query
+        items:
+          type: string
+        name: expand[]
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_fileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List files
+      tags:
+      - files
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: File to upload (pdf/docx)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: application/json (async, default) | text/event-stream (sync stream)
+        in: header
+        name: Accept
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      - text/event-stream
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.fileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload a file
+      tags:
+      - files
+  /files/{id}:
+    delete:
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete file
+      tags:
+      - files
+    get:
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - collectionFormat: csv
+        description: 'Expand related objects: user'
+        in: query
+        items:
+          type: string
+        name: expand[]
+        type: array
+      - description: application/json | application/pdf | application/vnd...docx |
+          text/event-stream
+        in: header
+        name: Accept
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.fileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get file metadata, download or stream status
+      tags:
+      - files
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /sessions:
+    get:
+      parameters:
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor
+        in: query
+        name: starting_after
+        type: string
+      - description: Cursor
+        in: query
+        name: ending_before
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_sessionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List active sessions
+      tags:
+      - auth
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email and password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.tokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Login
+      tags:
+      - auth
+  /sessions/{id}:
+    delete:
+      parameters:
+      - description: Session ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Logout
+      tags:
+      - auth
+  /tokens/password-reset:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Reset token and new password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.changePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Change password using reset token
+      tags:
+      - auth
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.passwordResetRequest'
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.passwordResetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Request password reset token
+      tags:
+      - auth
+  /tokens/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.tokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Refresh access token
+      tags:
+      - auth
+  /users:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email and password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.registerRequest'
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.userResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      summary: Register a new user
+      tags:
+      - auth
+  /users/{id}:
+    delete:
+      parameters:
+      - description: User ID or 'me'
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete user
+      tags:
+      - users
+    get:
+      parameters:
+      - description: User ID or 'me'
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.userResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get user
+      tags:
+      - users
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: User ID or 'me'
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateUserRequest'
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.userResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update user
+      tags:
+      - users
+  /webhooks:
+    get:
+      parameters:
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor
+        in: query
+        name: starting_after
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_webhookEndpointResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List webhook endpoints
+      tags:
+      - webhooks
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Endpoint config
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.webhookEndpointRequest'
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.webhookEndpointResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create webhook endpoint
+      tags:
+      - webhooks
+  /webhooks/{id}:
+    delete:
+      parameters:
+      - description: Webhook endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete webhook endpoint
+      tags:
+      - webhooks
+    get:
+      parameters:
+      - description: Webhook endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.webhookEndpointResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get webhook endpoint
+      tags:
+      - webhooks
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Webhook endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Endpoint config
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.webhookEndpointRequest'
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.webhookEndpointResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update webhook endpoint
+      tags:
+      - webhooks
+  /webhooks/{id}/events:
+    get:
+      parameters:
+      - description: Webhook endpoint ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor
+        in: query
+        name: starting_after
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_webhookEventResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List webhook delivery attempts
+      tags:
+      - webhooks
+securityDefinitions:
+  BearerAuth:
+    description: 'Enter token in format: Bearer {token}'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

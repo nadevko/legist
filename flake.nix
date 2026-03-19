@@ -32,15 +32,22 @@
     in
     {
 apps = k.forAllPkgs self { } (pkgs: {
-        swagen = {
+        tunnel = {
           type = "app";
           program =
             toString
-            <| pkgs.writeScript "swagen" ''
+            <| pkgs.writeScript "tunnel" ''
               #!/usr/bin/env bash
+
+              cleanup() {
+                  kill $(jobs -p) 2>/dev/null
+              }
+              trap cleanup EXIT SIGINT SIGTERM
+
               swag init -g doc.go -d ./internal/api -o docs
-              mv docs/swagger.json docs/v1-alpha.json
-              rm -f docs/swagger.yaml docs/doc.json
+
+              cloudflared tunnel run --token "$CLOUDFLARE_TOKEN" &
+              go run ./cmd/server/main.go
             '';
         };
       });
