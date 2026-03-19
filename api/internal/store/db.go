@@ -143,6 +143,12 @@ func Open(path string) (*sqlx.DB, error) {
 	`); err != nil {
 		return nil, fmt.Errorf("apply pragmas: %w", err)
 	}
+
+	// ХАК-МИГРАЦИЯ: пытаемся добавить колонку document_id в таблицу files, если ее там еще нет.
+	// Ошибку игнорируем, т.к. если базы еще не было или колонка уже добавлена — запрос вернет ошибку,
+	// и это нормальное поведение.
+	_, _ = db.Exec(`ALTER TABLE files ADD COLUMN document_id TEXT REFERENCES documents(id) ON DELETE SET NULL;`)
+
 	if _, err = db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
