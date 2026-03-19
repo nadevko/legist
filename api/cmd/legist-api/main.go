@@ -24,7 +24,7 @@ func main() {
 	log.Printf("starting server on %s (dev=%v)", cfg.Addr, cfg.Dev)
 	log.Printf("base path: %s", cfg.BasePath)
 	log.Printf("public host: %s", cfg.PublicHost)
-	log.Printf("swagger: http://localhost%s%s/swagger/index.html", cfg.Addr, cfg.BasePath)
+	log.Printf("swagger: %s%s%s/swagger/index.html", cfg.BasePath, cfg.Addr, cfg.BasePath)
 	log.Printf("llm: metadata=%s/%s analysis=%s/%s",
 		cfg.LLMMetadataProvider, cfg.MetadataModel,
 		cfg.LLMAnalysisProvider, cfg.AnalysisModel,

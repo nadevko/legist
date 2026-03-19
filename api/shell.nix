@@ -8,6 +8,7 @@
   gopls,
   gotools,
   poppler-utils,
+  railway,
 }: mkShell {
   packages = [
     delve
@@ -18,6 +19,7 @@
     gopls
     gotools
     poppler-utils
+    railway
   ];
 
   hardeningDisable = [ "fortify" ];

@@ -31,7 +31,7 @@
       ko = kasumi.overlays;
     in
     {
-apps = k.forAllPkgs self { } (pkgs: {
+      apps = k.forAllPkgs self { } (pkgs: {
         tunnel = {
           type = "app";
           program =
@@ -52,11 +52,13 @@ apps = k.forAllPkgs self { } (pkgs: {
         };
       });
 
-      nixosModules = k.collapseNixDir ./nix/nixos;
-      homeModules = k.collapseNixDir ./nix/home;
+      nixosModules = rec {
+        default = legist-api;
+        legist-api = ./api/nix/nixos-module.nix;
+      };
 
       overlays = {
-        default = k.comfyByNameOverlayFrom <| k.readDirPaths ./nix/pkgs;
+        default = import ./api/nix/overlay.nix;
         augment = k.augmentLib ko.lib;
 
         environment = k.foldLay [
@@ -82,8 +84,9 @@ apps = k.forAllPkgs self { } (pkgs: {
         ];
       };
 
-      devShells = k.forAllPkgs self { } (pkgs: {
-        default = pkgs.callPackage ./shell.nix { };
+      devShells = k.forAllPkgs self { } (pkgs: rec {
+        default = legist-api-shell;
+        legist-api-shell = pkgs.callPackage ./api/shell.nix { };
       });
 
       formatter = k.forAllPkgs self { } <| builtins.getAttr "kasumi-fmt";
