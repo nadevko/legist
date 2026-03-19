@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 type Config struct {
 	Addr       string
@@ -26,8 +29,14 @@ type Config struct {
 }
 
 func Load() *Config {
+	addr := getEnv("ADDR", "")
+	if addr == "" {
+		port := getEnv("PORT", "8080")
+		addr = fmt.Sprintf("0.0.0.0:%s", port)
+	}
+
 	return &Config{
-		Addr:       getEnv("ADDR", ":8080"),
+		Addr:       addr,
 		DBPath:     getEnv("DB_PATH", "legist.db"),
 		DataPath:   getEnv("DATA_PATH", "../data"),
 		JWTSecret:  getEnv("JWT_SECRET", "change-me-in-prod"),
