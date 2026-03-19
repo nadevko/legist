@@ -15,6 +15,58 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/chat": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Ask a question about laws",
+                "parameters": [
+                    {
+                        "description": "Question",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.chatRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "application/json | text/event-stream",
+                        "name": "Accept",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.chatResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/files": {
             "get": {
                 "security": [
@@ -29,26 +81,65 @@ const docTemplate = `{
                     "files"
                 ],
                 "summary": "List files",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "omit=current user files, public=laws only",
+                        "name": "owner",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status: pending|processing|done|failed",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Limit (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor: last file ID from previous page",
+                        "name": "starting_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor: first file ID from next page",
+                        "name": "ending_before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Expand related objects: user",
+                        "name": "expand[]",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/api.fileResponse"
-                            }
+                            "$ref": "#/definitions/api.listResponse-api_fileResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -63,44 +154,57 @@ const docTemplate = `{
                     "multipart/form-data"
                 ],
                 "produces": [
-                    "application/json"
+                    "application/json",
+                    "text/event-stream"
                 ],
                 "tags": [
                     "files"
                 ],
-                "summary": "Upload files (batch)",
+                "summary": "Upload a file",
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Files to upload (pdf/docx)",
-                        "name": "file[]",
+                        "description": "File to upload (pdf/docx)",
+                        "name": "file",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "application/json (async, default) | text/event-stream (sync stream)",
+                        "name": "Accept",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
-                    "202": {
-                        "description": "Accepted",
+                    "201": {
+                        "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.uploadResponse"
+                            "$ref": "#/definitions/api.fileResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -113,10 +217,13 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "files"
                 ],
-                "summary": "Download file",
+                "summary": "Get file metadata, download or stream status",
                 "parameters": [
                     {
                         "type": "string",
@@ -124,22 +231,41 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Expand related objects: user",
+                        "name": "expand[]",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "application/json | application/pdf | application/vnd...docx | text/event-stream",
+                        "name": "Accept",
+                        "in": "header"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.fileResponse"
+                        }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -161,67 +287,37 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
-                    "204": {
-                        "description": "No Content"
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.deletedResponse"
+                        }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/files/{id}.sse": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Stream file parsing status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "File ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -249,97 +345,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/jobs/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "jobs"
-                ],
-                "summary": "Get job status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Job ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/api.jobResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/jobs/{id}.sse": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "tags": [
-                    "jobs"
-                ],
-                "summary": "Stream job progress",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Job ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/me": {
+        "/sessions": {
             "get": {
                 "security": [
                     {
@@ -352,64 +358,48 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "Get current user",
+                "summary": "List active sessions",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor",
+                        "name": "starting_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor",
+                        "name": "ending_before",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.userResponse"
+                            "$ref": "#/definitions/api.listResponse-api_sessionResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
             },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "tags": [
-                    "users"
-                ],
-                "summary": "Delete current user",
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/sessions": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -442,23 +432,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
-            },
+            }
+        },
+        "/sessions/{id}": {
             "delete": {
                 "security": [
                     {
@@ -469,20 +461,38 @@ const docTemplate = `{
                     "auth"
                 ],
                 "summary": "Logout",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
                 "responses": {
-                    "204": {
-                        "description": "No Content"
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.deletedResponse"
+                        }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -497,7 +507,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "auth"
                 ],
                 "summary": "Request password reset token",
                 "parameters": [
@@ -509,6 +519,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/api.passwordResetRequest"
                         }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
@@ -521,19 +537,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -546,7 +562,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "auth"
                 ],
                 "summary": "Change password using reset token",
                 "parameters": [
@@ -561,25 +577,28 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "204": {
-                        "description": "No Content"
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.deletedResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -618,19 +637,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -657,6 +676,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/api.registerRequest"
                         }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
@@ -669,19 +694,532 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.errorResponse"
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID or 'me'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.userResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Delete user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID or 'me'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.deletedResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Update user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID or 'me'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.updateUserRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.userResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhooks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "List webhook endpoints",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor",
+                        "name": "starting_after",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.listResponse-api_webhookEndpointResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "Create webhook endpoint",
+                "parameters": [
+                    {
+                        "description": "Endpoint config",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.webhookEndpointRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.webhookEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhooks/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "Get webhook endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Webhook endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.webhookEndpointResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "Delete webhook endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Webhook endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.deletedResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "Update webhook endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Webhook endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Endpoint config",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.webhookEndpointRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.webhookEndpointResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhooks/{id}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "List webhook delivery attempts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Webhook endpoint ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor",
+                        "name": "starting_after",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.listResponse-api_webhookEventResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
                         }
                     }
                 }
@@ -689,6 +1227,35 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "api.apiError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "param": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.apiErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/api.apiError"
+                },
+                "object": {
+                    "description": "\"error\"",
+                    "type": "string"
+                }
+            }
+        },
         "api.changePasswordRequest": {
             "type": "object",
             "properties": {
@@ -702,10 +1269,60 @@ const docTemplate = `{
                 }
             }
         },
-        "api.errorResponse": {
+        "api.chatRequest": {
             "type": "object",
             "properties": {
                 "message": {
+                    "type": "string",
+                    "example": "What does the Constitution say about the right to work?"
+                }
+            }
+        },
+        "api.chatResponse": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"chat.completion\"",
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.chatSource"
+                    }
+                }
+            }
+        },
+        "api.chatSource": {
+            "type": "object",
+            "properties": {
+                "article": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.deletedResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
                     "type": "string"
                 }
             }
@@ -713,8 +1330,8 @@ const docTemplate = `{
         "api.fileResponse": {
             "type": "object",
             "properties": {
-                "created_at": {
-                    "type": "string"
+                "created": {
+                    "type": "integer"
                 },
                 "id": {
                     "type": "string"
@@ -725,67 +1342,89 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "object": {
+                    "description": "\"file\"",
+                    "type": "string"
+                },
                 "size": {
                     "type": "integer"
                 },
                 "status": {
                     "type": "string"
-                }
-            }
-        },
-        "api.fileResult": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
                 },
-                "file_id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "status": {
+                "user_id": {
                     "type": "string"
                 }
             }
         },
-        "api.jobFileResponse": {
+        "api.listResponse-api_fileResponse": {
             "type": "object",
             "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "file_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.jobResponse": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "files": {
+                "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.jobFileResponse"
+                        "$ref": "#/definitions/api.fileResponse"
                     }
                 },
-                "id": {
-                    "type": "string"
+                "has_more": {
+                    "type": "boolean"
                 },
-                "status": {
+                "object": {
+                    "description": "\"list\"",
                     "type": "string"
+                }
+            }
+        },
+        "api.listResponse-api_sessionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.sessionResponse"
+                    }
                 },
-                "type": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "object": {
+                    "description": "\"list\"",
+                    "type": "string"
+                }
+            }
+        },
+        "api.listResponse-api_webhookEndpointResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.webhookEndpointResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "object": {
+                    "description": "\"list\"",
+                    "type": "string"
+                }
+            }
+        },
+        "api.listResponse-api_webhookEventResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.webhookEventResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "object": {
+                    "description": "\"list\"",
                     "type": "string"
                 }
             }
@@ -815,6 +1454,10 @@ const docTemplate = `{
         "api.passwordResetResponse": {
             "type": "object",
             "properties": {
+                "object": {
+                    "description": "\"token.password_reset\"",
+                    "type": "string"
+                },
                 "reset_token": {
                     "type": "string"
                 }
@@ -842,10 +1485,35 @@ const docTemplate = `{
                 }
             }
         },
+        "api.sessionResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "expires_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"session\"",
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "api.tokenResponse": {
             "type": "object",
             "properties": {
                 "access_token": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"token\"",
                     "type": "string"
                 },
                 "refresh_token": {
@@ -853,27 +1521,102 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uploadResponse": {
+        "api.updateUserRequest": {
             "type": "object",
             "properties": {
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.fileResult"
-                    }
-                },
-                "job_id": {
-                    "type": "string"
+                "email": {
+                    "type": "string",
+                    "example": "new@example.com"
                 }
             }
         },
         "api.userResponse": {
             "type": "object",
             "properties": {
+                "created": {
+                    "type": "integer"
+                },
                 "email": {
                     "type": "string"
                 },
                 "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"user\"",
+                    "type": "string"
+                }
+            }
+        },
+        "api.webhookEndpointRequest": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "[\"file.created\"",
+                        "\"diff.done\"]"
+                    ]
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://example.com/webhook"
+                }
+            }
+        },
+        "api.webhookEndpointResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"webhook.endpoint\"",
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.webhookEventResponse": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "endpoint_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "description": "\"webhook.event\"",
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -892,11 +1635,11 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "v1-alpha",
-	Host:             "localhost:8080",
+	Host:             "legist.nadevko.cc",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Legist API",
-	Description:      "AI assistant for comparing revisions of legal acts of the Republic of Belarus",
+	Description:      "AI assistant for comparing revisions of legal acts of the Republic of Belarus.\n\n## Authentication\nAll endpoints except auth require a Bearer token in the Authorization header.\nObtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.\n\n## Request IDs\nEvery response includes a `Request-Id` header for debugging.\n\n## Idempotency\n`POST` requests require an `Idempotency-Key` header.\nRepeating a request with the same key returns the cached response.\nKeys expire after 24 hours. If a key is reused for a different\nendpoint, a 422 error is returned.\n\n## Pagination\nList endpoints support cursor-based pagination via `starting_after`\nand `ending_before` query params. Default limit is 20, max 100.\nResponse includes `has_more: true` if more items exist.\n\n## Expanding objects\nPass `expand[]=user` (or other resource name) to expand related\nobjects inline instead of returning only their ID.\n\n## Content negotiation\nUse the `Accept` header to control response format and behaviour:\n- `application/json` — JSON metadata (default)\n- `text/event-stream` — SSE stream (async progress or sync upload)\n- `application/pdf`, `application/vnd...docx` — file download\n\n## File processing\nFiles are parsed asynchronously after upload. Track progress via:\n1. **Webhooks** — register an endpoint, receive `file.parsed` event\n2. **Sync SSE** — `POST /files` with `Accept: text/event-stream`\n3. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`\n\n## Webhooks\nRegister endpoints via `POST /webhooks`. Each delivery is signed\nwith HMAC-SHA256. Verify the `Legist-Signature: sha256=...` header\nusing your endpoint secret. Failed deliveries are retried 3 times\nwith exponential backoff. Inspect history via `GET /webhooks/:id/events`.\n\n### Supported events\n| Event | Description |\n|-------|-------------|\n| `file.created` | File uploaded |\n| `file.parsed` | Parsing succeeded |\n| `file.failed` | Parsing failed |\n| `file.deleted` | File deleted |\n| `diff.created` | Diff started |\n| `diff.done` | Diff completed |\n| `diff.failed` | Diff failed |\n| `user.created` | User registered |\n| `user.deleted` | User deleted |\n\n### Signature verification (Go example)\n```go\nmac := hmac.New(sha256.New, []byte(secret))\nmac.Write(body)\nexpected := \"sha256=\" + hex.EncodeToString(mac.Sum(nil))\nok := hmac.Equal([]byte(expected), []byte(signature))\n```",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

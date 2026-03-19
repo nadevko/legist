@@ -4,7 +4,6 @@ import (
 	"log"
 
 	_ "github.com/nadevko/legist/docs"
-
 	"github.com/nadevko/legist/internal/api"
 	"github.com/nadevko/legist/internal/config"
 	"github.com/nadevko/legist/internal/store"

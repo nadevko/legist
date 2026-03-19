@@ -1,264 +1,233 @@
 package api
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/nadevko/legist/internal/auth"
+	"github.com/nadevko/legist/internal/parser"
 	"github.com/nadevko/legist/internal/sse"
 	"github.com/nadevko/legist/internal/store"
+	"github.com/nadevko/legist/internal/webhook"
 )
-
-type fileResult struct {
-	FileID string  `json:"file_id,omitempty"`
-	Name   string  `json:"name"`
-	Status string  `json:"status"`
-	Error  *string `json:"error,omitempty"`
-}
-
-type uploadResponse struct {
-	JobID string       `json:"job_id"`
-	Files []fileResult `json:"files"`
-}
-
-// handleUploadFiles godoc
-// @Summary     Upload files (batch)
-// @Tags        files
-// @Security    BearerAuth
-// @Accept      multipart/form-data
-// @Produce     json
-// @Param       file[] formData file true "Files to upload (pdf/docx)"
-// @Success     202 {object} uploadResponse
-// @Failure     400 {object} errorResponse
-// @Failure     401 {object} errorResponse
-// @Failure     500 {object} errorResponse
-// @Router      /files [post]
-func (s *Server) handleUploadFiles(c echo.Context) error {
-	userID := auth.UserID(c)
-	form, err := c.MultipartForm()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid multipart form")
-	}
-
-	formFiles := form.File["file[]"]
-	if len(formFiles) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "file[] is required")
-	}
-
-	job := &store.Job{
-		ID:        uuid.NewString(),
-		UserID:    userID,
-		Type:      "file_upload",
-		Status:    "pending",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-	if err = s.jobs.Create(job); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
-	}
-
-	results := make([]fileResult, 0, len(formFiles))
-
-	for _, fh := range formFiles {
-		mime := fh.Header.Get("Content-Type")
-		if !allowedMIME[mime] {
-			errMsg := fmt.Sprintf("unsupported mime type: %s", mime)
-			results = append(results, fileResult{Name: fh.Filename, Status: "failed", Error: &errMsg})
-			continue
-		}
-
-		fileID := uuid.NewString()
-		dir := filepath.Join(s.cfg.DataPath, "files", fileID)
-		dst := filepath.Join(dir, fh.Filename)
-
-		saveErr := func() error {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return err
-			}
-			src, err := fh.Open()
-			if err != nil {
-				return err
-			}
-			defer src.Close()
-
-			out, err := os.Create(dst)
-			if err != nil {
-				return err
-			}
-			defer out.Close()
-
-			_, err = io.Copy(out, src)
-			return err
-		}()
-
-		if saveErr != nil {
-			errMsg := fmt.Sprintf("failed to save file: %v", saveErr)
-			results = append(results, fileResult{Name: fh.Filename, Status: "failed", Error: &errMsg})
-			continue
-		}
-
-		f := &store.File{
-			ID:       fileID,
-			UserID:   userID,
-			Name:     fh.Filename,
-			MimeType: mime,
-			Size:     fh.Size,
-			Path:     dst,
-			Status:   "pending",
-		}
-		if err = s.files.Create(f); err != nil {
-			errMsg := "failed to save file metadata"
-			results = append(results, fileResult{Name: fh.Filename, Status: "failed", Error: &errMsg})
-			continue
-		}
-
-		if err = s.jobs.AddFile(&store.JobFile{
-			JobID:  job.ID,
-			FileID: fileID,
-			Status: "pending",
-		}); err != nil {
-			errMsg := "failed to link file to job"
-			results = append(results, fileResult{Name: fh.Filename, Status: "failed", Error: &errMsg})
-			continue
-		}
-
-		results = append(results, fileResult{FileID: fileID, Name: fh.Filename, Status: "pending"})
-		go s.parseFile(job.ID, f)
-	}
-
-	return c.JSON(http.StatusAccepted, uploadResponse{JobID: job.ID, Files: results})
-}
-
-// handleGetFile godoc
-// @Summary     Download file
-// @Tags        files
-// @Security    BearerAuth
-// @Param       id path string true "File ID"
-// @Success     200
-// @Failure     401 {object} errorResponse
-// @Failure     404 {object} errorResponse
-// @Router      /files/{id} [get]
-func (s *Server) handleGetFile(c echo.Context) error {
-	f, err := s.files.GetByID(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
-	}
-	if f.UserID != auth.UserID(c) {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
-	}
-	return c.File(f.Path)
-}
 
 // handleListFiles godoc
 // @Summary     List files
 // @Tags        files
 // @Security    BearerAuth
 // @Produce     json
-// @Success     200 {array} fileResponse
-// @Failure     401 {object} errorResponse
-// @Failure     500 {object} errorResponse
+// @Param       owner          query  string   false "omit=current user files, public=laws only"
+// @Param       status         query  string   false "Filter by status: pending|processing|done|failed"
+// @Param       limit          query  int      false "Limit (default 20, max 100)"
+// @Param       starting_after query  string   false "Cursor: last file ID from previous page"
+// @Param       ending_before  query  string   false "Cursor: first file ID from next page"
+// @Param       expand[]       query  []string false "Expand related objects: user"
+// @Success     200 {object} listResponse[fileResponse]
+// @Failure     401 {object} apiErrorResponse
+// @Failure     500 {object} apiErrorResponse
 // @Router      /files [get]
 func (s *Server) handleListFiles(c echo.Context) error {
-	files, err := s.files.ListByUser(auth.UserID(c))
+	p, err := bindListParams(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
+		return err
 	}
-	resp := make([]fileResponse, len(files))
-	for i, f := range files {
-		resp[i] = fileResponse{
-			ID:        f.ID,
-			Name:      f.Name,
-			MimeType:  f.MimeType,
-			Size:      f.Size,
-			Status:    f.Status,
-			CreatedAt: f.CreatedAt.Format(time.RFC3339),
-		}
+	filter, err := ownerFilter(c)
+	if err != nil {
+		return err
 	}
-	return c.JSON(http.StatusOK, resp)
+	files, err := s.files.List(filter, p.toStore())
+	if err != nil {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	return c.JSON(http.StatusOK, listResult(files, p.Limit, toFileResponse))
+}
+
+// handleGetFile godoc
+// @Summary     Get file metadata, download or stream status
+// @Tags        files
+// @Security    BearerAuth
+// @Param       id       path   string   true  "File ID"
+// @Param       expand[] query  []string false "Expand related objects: user"
+// @Param       Accept   header string   false "application/json | application/pdf | application/vnd...docx | text/event-stream"
+// @Produce     json
+// @Success     200 {object} fileResponse
+// @Failure     401 {object} apiErrorResponse
+// @Failure     404 {object} apiErrorResponse
+// @Router      /files/{id} [get]
+func (s *Server) handleGetFile(c echo.Context) error {
+	id := c.Param("id")
+	f, err := s.files.GetByID(id)
+	if err != nil {
+		return errorf(http.StatusNotFound, "resource_missing", "no such file: "+id)
+	}
+
+	userID := auth.UserID(c)
+	if f.UserID != nil && *f.UserID != userID {
+		return errorf(http.StatusNotFound, "resource_missing", "no such file: "+id)
+	}
+
+	switch c.Request().Header.Get("Accept") {
+	case "text/event-stream":
+		return sse.Stream(c, s.broker, f.ID)
+	case "application/json", "":
+		return c.JSON(http.StatusOK, toFileResponse(*f))
+	default:
+		return c.File(f.Path)
+	}
+}
+
+// handleUploadFile godoc
+// @Summary     Upload a file
+// @Tags        files
+// @Security    BearerAuth
+// @Accept      multipart/form-data
+// @Produce     json
+// @Produce     text/event-stream
+// @Param       file            formData file   true  "File to upload (pdf/docx)"
+// @Param       Accept          header   string false "application/json (async, default) | text/event-stream (sync stream)"
+// @Param       Idempotency-Key header   string false "Idempotency key"
+// @Success     201 {object} fileResponse
+// @Failure     400 {object} apiErrorResponse
+// @Failure     401 {object} apiErrorResponse
+// @Failure     500 {object} apiErrorResponse
+// @Router      /files [post]
+func (s *Server) handleUploadFile(c echo.Context) error {
+	userID := auth.UserID(c)
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return errorf(http.StatusBadRequest, "parameter_missing", "file is required", "file")
+	}
+
+	mime := strings.Split(fh.Header.Get("Content-Type"), ";")[0]
+	if !allowedMIME[mime] {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value",
+			"unsupported mime type: "+mime, "file")
+	}
+
+	src, err := fh.Open()
+	if err != nil {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	defer src.Close()
+
+	if err = parser.ValidateReader(src, fh.Size, mime); err != nil {
+		return errorf(http.StatusBadRequest, "invalid_file", err.Error(), "file")
+	}
+	if _, err = src.Seek(0, io.SeekStart); err != nil {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+
+	fileID := newID("file")
+	dir := filepath.Join(s.cfg.DataPath, "files", fileID)
+	dst := filepath.Join(dir, fh.Filename)
+
+	if err = saveFile(src, dir, dst); err != nil {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+
+	f := &store.File{
+		ID:       fileID,
+		UserID:   &userID,
+		Name:     fh.Filename,
+		MimeType: mime,
+		Size:     fh.Size,
+		Path:     dst,
+		Status:   "pending",
+	}
+	if err = s.files.Create(f); err != nil {
+		os.RemoveAll(dir)
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+
+	s.dispatcher.Dispatch(webhook.EventFileCreated, toFileResponse(*f))
+	go s.parseFile(f)
+
+	if c.Request().Header.Get("Accept") == "text/event-stream" {
+		return sse.Stream(c, s.broker, f.ID)
+	}
+	return c.JSON(http.StatusCreated, toFileResponse(*f))
 }
 
 // handleDeleteFile godoc
 // @Summary     Delete file
 // @Tags        files
 // @Security    BearerAuth
-// @Param       id path string true "File ID"
-// @Success     204
-// @Failure     401 {object} errorResponse
-// @Failure     404 {object} errorResponse
-// @Failure     500 {object} errorResponse
+// @Param       id              path   string true  "File ID"
+// @Param       Idempotency-Key header string false "Idempotency key"
+// @Success     200 {object} deletedResponse
+// @Failure     401 {object} apiErrorResponse
+// @Failure     404 {object} apiErrorResponse
+// @Failure     500 {object} apiErrorResponse
 // @Router      /files/{id} [delete]
 func (s *Server) handleDeleteFile(c echo.Context) error {
-	f, err := s.files.GetByID(c.Param("id"))
+	id := c.Param("id")
+	f, err := s.files.GetByID(id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
+		return errorf(http.StatusNotFound, "resource_missing", "no such file: "+id)
 	}
-	if f.UserID != auth.UserID(c) {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
+	if f.UserID == nil || *f.UserID != auth.UserID(c) {
+		return errorf(http.StatusNotFound, "resource_missing", "no such file: "+id)
 	}
 	if err = os.RemoveAll(filepath.Dir(f.Path)); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	if err = s.files.Delete(f.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.NoContent(http.StatusNoContent)
+	s.dispatcher.Dispatch(webhook.EventFileDeleted, toFileResponse(*f))
+	return c.JSON(http.StatusOK, deleted(id, "file"))
 }
 
-// handleFileSSE godoc
-// @Summary     Stream file parsing status
-// @Tags        files
-// @Security    BearerAuth
-// @Param       id path string true "File ID"
-// @Success     200
-// @Failure     401 {object} errorResponse
-// @Failure     404 {object} errorResponse
-// @Router      /files/{id}.sse [get]
-func (s *Server) handleFileSSE(c echo.Context) error {
-	f, err := s.files.GetByID(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
-	}
-	if f.UserID != auth.UserID(c) {
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
-	}
-	return sse.Stream(c, s.broker, f.ID)
-}
-
-// parseFile запускается в горутине — парсит файл и публикует события.
-func (s *Server) parseFile(jobID string, f *store.File) {
+func (s *Server) parseFile(f *store.File) {
 	publish := func(evtType string, data any) {
 		s.broker.Publish(f.ID, sse.Event{Type: evtType, Data: data})
-		s.broker.Publish(jobID, sse.Event{Type: evtType, Data: data})
 	}
 
 	s.files.UpdateStatus(f.ID, "processing")
 	publish("progress", map[string]any{"file_id": f.ID, "status": "processing"})
 
-	// TODO: вызвать internal/parser
-
-	s.files.UpdateStatus(f.ID, "done")
-	s.jobs.UpdateFileStatus(jobID, f.ID, "done", nil)
-	publish("done", map[string]any{"file_id": f.ID, "status": "done"})
-
-	s.updateJobStatus(jobID)
-}
-
-func (s *Server) updateJobStatus(jobID string) {
-	jfs, err := s.jobs.ListFiles(jobID)
-	if err != nil {
+	if _, err := parser.ParseFile(f.Path, f.MimeType); err != nil {
+		s.files.UpdateStatus(f.ID, "failed")
+		publish("failed", map[string]any{"file_id": f.ID, "status": "failed", "error": err.Error()})
+		s.dispatcher.Dispatch(webhook.EventFileFailed, toFileResponse(*f))
 		return
 	}
-	for _, jf := range jfs {
-		if jf.Status == "pending" || jf.Status == "processing" {
-			return
-		}
+
+	// TODO: сохранить распаршенный документ для диффа
+
+	s.files.UpdateStatus(f.ID, "done")
+	publish("done", map[string]any{"file_id": f.ID, "status": "done"})
+	s.dispatcher.Dispatch(webhook.EventFileParsed, toFileResponse(*f))
+}
+
+func toFileResponse(f store.File) fileResponse {
+	return fileResponse{
+		ID:       f.ID,
+		Object:   "file",
+		Name:     f.Name,
+		MimeType: f.MimeType,
+		Size:     f.Size,
+		Status:   f.Status,
+		UserID:   f.UserID,
+		Created:  toUnix(f.CreatedAt),
 	}
-	s.jobs.UpdateStatus(jobID, "done")
-	s.broker.Publish(jobID, sse.Event{Type: "done", Data: map[string]any{"job_id": jobID}})
+}
+
+func saveFile(src io.Reader, dir, dst string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, src)
+	return err
 }

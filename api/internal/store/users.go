@@ -20,6 +20,15 @@ func (s *UserStore) Create(u *User) error {
 	return nil
 }
 
+func (s *UserStore) UpdateEmail(id, email string) error {
+	if _, err := s.db.Exec(
+		`UPDATE users SET email = ? WHERE id = ?`, email, id,
+	); err != nil {
+		return fmt.Errorf("update email: %w", err)
+	}
+	return nil
+}
+
 func (s *UserStore) Delete(id string) error {
 	if _, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete user: %w", err)

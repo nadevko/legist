@@ -35,9 +35,11 @@ CREATE TABLE IF NOT EXISTS password_resets (
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE INDEX IF NOT EXISTS password_resets_token_hash ON password_resets(token_hash);
+
 CREATE TABLE IF NOT EXISTS files (
 	id         TEXT PRIMARY KEY,
-	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
 	name       TEXT NOT NULL,
 	mime_type  TEXT NOT NULL,
 	size       INTEGER NOT NULL,
@@ -46,25 +48,47 @@ CREATE TABLE IF NOT EXISTS files (
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS jobs (
+CREATE INDEX IF NOT EXISTS files_user_id ON files(user_id);
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+	key        TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL,
+	method     TEXT NOT NULL,
+	path       TEXT NOT NULL,
+	status     INTEGER NOT NULL DEFAULT 0,
+	response   TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idempotency_keys_user ON idempotency_keys(user_id);
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
 	id         TEXT PRIMARY KEY,
 	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	type       TEXT NOT NULL,
-	status     TEXT NOT NULL DEFAULT 'pending',
-	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-	expires_at DATETIME NOT NULL
+	url        TEXT NOT NULL,
+	secret     TEXT NOT NULL,
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS job_files (
-	job_id  TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-	file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-	status  TEXT NOT NULL DEFAULT 'pending',
-	error   TEXT,
-	PRIMARY KEY (job_id, file_id)
+CREATE TABLE IF NOT EXISTS webhook_endpoint_events (
+	endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+	event       TEXT NOT NULL,
+	PRIMARY KEY (endpoint_id, event)
 );
 
-CREATE INDEX IF NOT EXISTS files_user_id ON files(user_id);
-CREATE INDEX IF NOT EXISTS jobs_user_id ON jobs(user_id);
+CREATE TABLE IF NOT EXISTS webhook_events (
+	id          TEXT PRIMARY KEY,
+	endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+	type        TEXT NOT NULL,
+	payload     TEXT NOT NULL,
+	status      TEXT NOT NULL DEFAULT 'pending',
+	attempts    INTEGER NOT NULL DEFAULT 0,
+	created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS webhook_events_endpoint ON webhook_events(endpoint_id);
+CREATE INDEX IF NOT EXISTS webhook_events_status ON webhook_events(status);
 `
 
 func Open(path string) (*sqlx.DB, error) {

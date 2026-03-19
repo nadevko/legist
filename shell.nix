@@ -6,9 +6,8 @@
   gomod2nix,
   gopls,
   gotools,
-  go-swag,
-}:
-mkShell {
+  poppler_utils,
+}: mkShell {
   packages = [
     go
     delve
@@ -16,7 +15,7 @@ mkShell {
     gomod2nix
     gopls
     gotools
-    go-swag
+    poppler_utils
   ];
 
   hardeningDisable = [ "fortify" ];
