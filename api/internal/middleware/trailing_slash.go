@@ -7,6 +7,21 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+func joinPath(basePath, suffix string) string {
+	base := strings.Trim(basePath, "/")
+	suf := strings.Trim(suffix, "/")
+	switch {
+	case base == "" && suf == "":
+		return "/"
+	case base == "":
+		return "/" + suf
+	case suf == "":
+		return "/" + base
+	default:
+		return "/" + base + "/" + suf
+	}
+}
+
 func TrailingSlash(basePath string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -17,18 +32,31 @@ func TrailingSlash(basePath string) echo.MiddlewareFunc {
 			req := c.Request()
 			path := req.URL.Path
 
-			base := strings.TrimRight(basePath, "/")
+			apiRoot := joinPath(basePath, "")
+			swaggerRoot := joinPath(basePath, "swagger")
+			swaggerIndex := joinPath(basePath, "swagger/index.html")
 
-			if path == base || path == base+"/swagger" {
-				query := ""
+			redirect := func(status int, target string) error {
 				if req.URL.RawQuery != "" {
-					query = "?" + req.URL.RawQuery
+					target += "?" + req.URL.RawQuery
 				}
+				return c.Redirect(status, target)
+			}
 
-				return c.Redirect(
-					http.StatusTemporaryRedirect,
-					path+"/"+query,
-				)
+			// Canonical Swagger UI entrypoints.
+			if path == apiRoot || path == apiRoot+"/" ||
+				path == swaggerRoot || path == swaggerRoot+"/" {
+				return redirect(http.StatusMovedPermanently, swaggerIndex)
+			}
+
+			// Do not normalize Swagger asset paths.
+			if path == swaggerRoot || strings.HasPrefix(path, swaggerRoot+"/") {
+				return next(c)
+			}
+
+			// Stripe-style canonical URLs: strip trailing slash everywhere else.
+			if len(path) > 1 && strings.HasSuffix(path, "/") {
+				return redirect(http.StatusTemporaryRedirect, strings.TrimSuffix(path, "/"))
 			}
 
 			return next(c)

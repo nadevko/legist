@@ -1,8 +1,6 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -72,15 +70,8 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 func (s *Server) registerRoutes() {
 	e := s.e
 
-	e.GET("/", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
-	})
-
 	api := e.Group(s.cfg.BasePath)
 
-	api.GET("/", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, s.cfg.BasePath+"/swagger/")
-	})
 	api.GET("/swagger/*", echoSwagger.EchoWrapHandler(func(c *echoSwagger.Config) {
 		c.URLs = []string{"v1-alpha.json"}
 	}))
