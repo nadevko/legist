@@ -271,8 +271,14 @@ export function useCompareProgress() {
         setLabel('Ошибка обработки')
         console.error('SSE file error:', err)
       } finally {
-        setRunning(false)
-        if (ok) onDone()
+        // On success, allow UI to disappear (navigation can happen).
+        // On failure, keep the progress block visible with error label.
+        if (controller.signal.aborted) {
+          setRunning(false)
+        } else if (ok) {
+          setRunning(false)
+          onDone()
+        }
       }
     }
 
@@ -362,8 +368,14 @@ export function useCompareProgress() {
         setStep(4)
         setLabel('Ошибка обработки')
       } finally {
-        setRunning(false)
-        if (ok && diffId) onDone(diffId)
+        // On success, hide progress (navigation can happen).
+        // On failure, keep progress visible so user can see the error label.
+        if (controller.signal.aborted) {
+          setRunning(false)
+        } else if (ok && diffId) {
+          setRunning(false)
+          onDone(diffId)
+        }
       }
     }
 

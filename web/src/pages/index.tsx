@@ -337,6 +337,13 @@ export function HomePage() {
 
   const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100 MB
 
+  const mimeFromName = (name: string) => {
+    const lower = name.toLowerCase()
+    if (lower.endsWith('.pdf')) return 'application/pdf'
+    if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    return ''
+  }
+
   const removeOld = () => setOldFile(null)
   const removeNew = () => setNewFile(null)
 
@@ -415,7 +422,8 @@ export function HomePage() {
       // 1) Create the left side as a new file/version, but do it lazily to avoid
       // duplicate document creation conflicts.
       const uploadFd = new FormData()
-      uploadFd.append('file', oldFile)
+      const leftMime = mimeFromName(oldFile.name)
+      uploadFd.append('file', new File([oldFile], oldFile.name, { type: leftMime || oldFile.type }))
       uploadFd.append('lazy', 'true')
 
       const uploadRes = await apiFetch('/api/files', {
@@ -439,7 +447,8 @@ export function HomePage() {
       // 2) Create a diff by uploading the right side inside the diff request.
       const diffFd = new FormData()
       diffFd.append('left_file_id', leftFileId)
-      diffFd.append('file', newFile)
+      const rightMime = mimeFromName(newFile.name)
+      diffFd.append('file', new File([newFile], newFile.name, { type: rightMime || newFile.type }))
 
       progress.startDiff(diffFd, (diffId) => navigate(`/compare/${diffId}`))
     } catch (err) {
@@ -507,10 +516,10 @@ export function HomePage() {
           Сравнить редакции
         </button>
 
-        {progress.running && (
+        {(progress.running || loadingOld) && (
           <div className="progress-wrap">
-            <div className="progress-label">{progress.label}</div>
-            <div className="progress-bar"><div className="progress-fill" style={{ width: progress.pct + '%' }} /></div>
+            <div className="progress-label">{loadingOld && !progress.running ? 'Загрузка файла...' : progress.label}</div>
+            <div className="progress-bar"><div className="progress-fill" style={{ width: (loadingOld && !progress.running ? 5 : progress.pct) + '%' }} /></div>
             <div className="progress-steps">
               {progress.steps.map((s, i) => <span key={s} className={`ps${progress.step === i ? ' active' : progress.step > i ? ' done' : ''}`}>{s}</span>)}
             </div>
