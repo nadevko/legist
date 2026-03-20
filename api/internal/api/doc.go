@@ -32,6 +32,7 @@
 // @description     Use the `Accept` header to control response format:
 // @description     - `application/json` — JSON metadata (default)
 // @description     - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
+// @description       with `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)
 // @description     - `text/event-stream` — SSE stream (async progress or sync upload)
 // @description     - `application/pdf`, `application/vnd...docx` — file download
 // @description
@@ -60,10 +61,10 @@
 // @description     | Stage | Description |
 // @description     |-------|-------------|
 // @description     | `parsing_started` | Document structure parsing in progress |
-// @description     | `llm_requested` | Metadata extraction request sent to LLM |
+// @description     | `llm_requested` | Metadata extraction starts as soon as first N chars are available |
 // @description     | `llm_skipped` | All metadata was provided explicitly, LLM not needed |
 // @description     | `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |
-// @description     | `saving` | Writing parsed.json to disk |
+// @description     | `saving` | Writing plain and legistoso artifacts to disk |
 // @description     | `done` | Processing complete |
 // @description     | `failed` | Processing failed; `error` and `missing_fields` present |
 // @description

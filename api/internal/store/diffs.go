@@ -97,7 +97,7 @@ func (s *DiffStore) UpdateStatus(id, status string) error {
 }
 
 // UpdateResult writes similarity, diff payload, and status (typically "done").
-func (s *DiffStore) UpdateResult(id string, similarity *float64, diffData, status string) error {
+func (s *DiffStore) UpdateResult(id string, similarity *float64, diffData DiffData, status string) error {
 	_, err := s.db.Exec(`
 		UPDATE diffs SET similarity_percent = ?, diff_data = ?, status = ? WHERE id = ?`,
 		similarity, diffData, status, id)

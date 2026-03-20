@@ -431,6 +431,7 @@ info:
     Use the `Accept` header to control response format:
     - `application/json` — JSON metadata (default)
     - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
+    with `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)
     - `text/event-stream` — SSE stream (async progress or sync upload)
     - `application/pdf`, `application/vnd...docx` — file download
 
@@ -459,10 +460,10 @@ info:
     | Stage | Description |
     |-------|-------------|
     | `parsing_started` | Document structure parsing in progress |
-    | `llm_requested` | Metadata extraction request sent to LLM |
+    | `llm_requested` | Metadata extraction starts as soon as first N chars are available |
     | `llm_skipped` | All metadata was provided explicitly, LLM not needed |
     | `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |
-    | `saving` | Writing parsed.json to disk |
+    | `saving` | Writing plain and legistoso artifacts to disk |
     | `done` | Processing complete |
     | `failed` | Processing failed; `error` and `missing_fields` present |
 
@@ -886,6 +887,10 @@ paths:
         name: id
         required: true
         type: string
+      - description: pdf|docx
+        in: query
+        name: type
+        type: string
       - description: pending|processing|done|failed
         in: query
         name: status
@@ -998,6 +1003,10 @@ paths:
       - description: Forward to /documents/:id/files
         in: query
         name: document_id
+        type: string
+      - description: pdf|docx
+        in: query
+        name: type
         type: string
       - description: pending|processing|done|failed
         in: query

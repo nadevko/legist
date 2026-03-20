@@ -59,6 +59,7 @@ func parseText(text string) *Document {
 	lines := strings.Split(text, "\n")
 	result := &Document{}
 	counter := &idCounter{}
+	var rawParts []string
 
 	type entry struct{ idx int }
 	var stack []entry
@@ -76,6 +77,7 @@ func parseText(text string) *Document {
 		if line == "" {
 			continue
 		}
+		rawParts = append(rawParts, line)
 
 		level, isHeading := detectHeading(line)
 
@@ -98,13 +100,22 @@ func parseText(text string) *Document {
 			}
 		} else if len(stack) > 0 {
 			cur := getSection()
-			if cur.Text == "" {
-				cur.Text = line
-			} else {
-				cur.Text += " " + line
+			cur.Chunks = append(cur.Chunks, Chunk{Text: line})
+		} else {
+			// Fallback: text before first heading is still part of plain text and a section.
+			sec := Section{
+				ID:          counter.next(0),
+				Label:       "body",
+				Level:       0,
+				SectionType: SectionUnknown,
+				Chunks:      []Chunk{{Text: line}},
 			}
+			result.Sections = append(result.Sections, sec)
+			stack = []entry{{idx: len(result.Sections) - 1}}
 		}
 	}
+	result.PlainText = NormalizePlainText(strings.Join(rawParts, "\n"))
+	assignChunkOffsets(result)
 
 	return result
 }

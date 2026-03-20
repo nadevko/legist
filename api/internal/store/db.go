@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS files (
 );
 CREATE INDEX IF NOT EXISTS files_user_id     ON files(user_id);
 CREATE INDEX IF NOT EXISTS files_document_id ON files(document_id);
+CREATE INDEX IF NOT EXISTS files_mime_type   ON files(mime_type);
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
 	key        TEXT PRIMARY KEY,

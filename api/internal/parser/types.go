@@ -51,9 +51,18 @@ type Section struct {
 	SectionType SectionType    `json:"section_type"`
 	Level       int            `json:"level"`
 	Path        []string       `json:"path,omitempty"`
-	Text        string         `json:"text"`
+	Chunks      []Chunk        `json:"chunks,omitempty"`
 	Children    []Section      `json:"children,omitempty"`
 	References  []TLCReference `json:"references,omitempty"`
+}
+
+// Chunk points to a text fragment inside canonical plain text.
+type Chunk struct {
+	Text       string `json:"text"`
+	PlainStart int    `json:"plain_start"` // rune offset, inclusive
+	PlainEnd   int    `json:"plain_end"`   // rune offset, exclusive
+	SectionID  string `json:"section_id,omitempty"`
+	SectionNum string `json:"section_num,omitempty"`
 }
 
 // MatchKey returns a stable key for structural diffing.
@@ -69,7 +78,8 @@ func (s *Section) MatchKey() string {
 // The pipeline in pipeline.go combines it with LLM-extracted metadata
 // to produce a ParsedFile written to parsed.json.
 type Document struct {
-	Sections []Section
+	Sections  []Section
+	PlainText string
 }
 
 func (d *Document) Flatten() []Section {
@@ -101,13 +111,15 @@ func (d *Document) FlattenLeaves() []Section {
 	return out
 }
 
-// ParsedFile is what gets written to data/files/{id}/parsed.json.
+// ParsedFile is what gets written to DATA_PATH/legistoso/{file_id}.
 // Combines the Document section tree with AKN-shaped metadata.
 type ParsedFile struct {
-	FileID     string     `json:"file_id"`
-	DocumentID string     `json:"document_id"`
-	Meta       ParsedMeta `json:"meta"`
-	Sections   []Section  `json:"sections"`
+	FileID        string     `json:"file_id"`
+	DocumentID    string     `json:"document_id"`
+	Meta          ParsedMeta `json:"meta"`
+	Sections      []Section  `json:"sections"`
+	PlainTextPath string     `json:"plain_text_path"`
+	PlainTextLen  int        `json:"plain_text_len"`
 
 	ParsedAt      time.Time `json:"parsed_at"`
 	ParserVersion string    `json:"parser_version"`

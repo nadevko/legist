@@ -166,7 +166,7 @@ type Diff struct {
 	Status string `db:"status"` // pending | processing | done | failed
 
 	SimilarityPercent *float64 `db:"similarity_percent"`
-	DiffData          string   `db:"diff_data"`
+	DiffData          DiffData `db:"diff_data"`
 
 	CreatedAt time.Time `db:"created_at"`
 }

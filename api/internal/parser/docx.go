@@ -24,6 +24,7 @@ func (p *docxParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
 
 	result := &Document{}
 	counter := &idCounter{}
+	var rawParts []string
 
 	// Stack stores index path from root: stack[0].idx is index in result.Sections,
 	// stack[1].idx is index in result.Sections[stack[0].idx].Children, etc.
@@ -48,6 +49,7 @@ func (p *docxParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
+		rawParts = append(rawParts, text)
 
 		style := strings.ToLower(strings.TrimSpace(para.Properties.Style.Val))
 		level, isHeading := headingStyles[style]
@@ -71,14 +73,21 @@ func (p *docxParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
 			}
 		} else if len(stack) > 0 {
 			cur := getSection()
-			if cur.Text == "" {
-				cur.Text = text
-			} else {
-				cur.Text += "\n" + text
+			cur.Chunks = append(cur.Chunks, Chunk{Text: text})
+		} else {
+			sec := Section{
+				ID:          counter.next(0),
+				Label:       "body",
+				Level:       0,
+				SectionType: SectionUnknown,
+				Chunks:      []Chunk{{Text: text}},
 			}
+			result.Sections = append(result.Sections, sec)
+			stack = []entry{{idx: len(result.Sections) - 1}}
 		}
-		// Text before any heading is ignored — uncommon in НПА.
 	}
+	result.PlainText = NormalizePlainText(strings.Join(rawParts, "\n"))
+	assignChunkOffsets(result)
 
 	return result, nil
 }

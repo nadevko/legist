@@ -33,12 +33,18 @@ type ParseProgress struct {
 
 type ProgressFunc func(ParseProgress)
 
+type metaResult struct {
+	meta LLMMeta
+	ok   bool
+}
+
 // PipelineConfig carries all inputs for the processing pipeline.
 type PipelineConfig struct {
 	// File identifiers
 	FileID     string
 	DocumentID string
 	Path       string
+	DataPath   string
 	MimeType   string
 
 	// AKN Work-level fields already known (from Document at pipeline start).
@@ -93,8 +99,9 @@ type PipelineResult struct {
 	References           []TLCReference
 	Keywords             []string
 
-	// ParsedFilePath is the path to the written parsed.json.
+	// ParsedFilePath is the path to the written legistoso artifact.
 	ParsedFilePath string
+	PlainTextPath  string
 }
 
 // Run executes the full parse+extract pipeline and returns PipelineResult.
@@ -149,30 +156,27 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 	needLLM := res.Subtype == "" || res.Number == "" || res.Author == "" || res.Date == "" ||
 		res.VersionDate == "" || res.Language == ""
 
+	var metaCh chan metaResult
 	if !needLLM {
 		emit(StageLLMSkipped, "all required metadata provided explicitly")
 	} else {
-		// --- 3. Build windows ---
+		// --- 3. Start metadata extraction once first N chars are available ---
 		size := cfg.WindowSize
 		if size <= 0 {
 			size = 3000
 		}
-		startW, endW := buildWindows(raw.Sections, size)
-		emit(StageLLMRequested, fmt.Sprintf(
-			"extracting AKN metadata (start=%d, end=%d chars)", len(startW), len(endW),
-		))
-
-		// --- 4. Extract metadata ---
-		type metaResult struct {
-			meta LLMMeta
-			ok   bool
-		}
-		metaCh := make(chan metaResult, 1)
+		startW := firstNRunes(raw.PlainText, size)
+		endW := startW
+		emit(StageLLMRequested, fmt.Sprintf("extracting AKN metadata (chars=%d)", len(startW)))
+		metaCh = make(chan metaResult, 1)
 		go func() {
 			meta, ok := ExtractMeta(ctx, cfg.MetaExtractor, startW, endW)
 			metaCh <- metaResult{meta, ok}
 		}()
+	}
 
+	// LLM may still be running while full parse is already completed.
+	if needLLM && metaCh != nil {
 		mr := <-metaCh
 		score := mr.meta.Score()
 		okVal := mr.ok
@@ -183,8 +187,6 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 				p.MetaOK = &okVal
 			},
 		)
-
-		// --- 5. Merge LLM results into known fields (known wins) ---
 		m := mr.meta
 		if res.Subtype == "" {
 			res.Subtype = m.Subtype
@@ -225,8 +227,6 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 		if res.PubNumber == "" {
 			res.PubNumber = m.PubNumber
 		}
-
-		// LLM-only enrichment (not stored as DB columns)
 		res.Lifecycle = m.Lifecycle
 		res.PassiveModifications = m.PassiveModifications
 		res.References = m.References
@@ -265,8 +265,8 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 	}
 	res.NPALevel = DeriveNPALevel(res.Subtype, res.Author)
 
-	// --- 8. Assemble and write parsed.json ---
-	emit(StageSaving, "writing parsed.json")
+	// --- 8. Assemble and write artifacts ---
+	emit(StageSaving, "writing plain and legistoso artifacts")
 
 	pf := &ParsedFile{
 		FileID:     cfg.FileID,
@@ -292,15 +292,18 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 			Keywords:             res.Keywords,
 		},
 		Sections:      raw.Sections,
+		PlainTextPath: filepath.ToSlash(filepath.Join("plain", cfg.FileID)),
+		PlainTextLen:  len([]rune(raw.PlainText)),
 		ParsedAt:      time.Now().UTC(),
 		ParserVersion: cfg.ParserVersion,
 	}
 
-	outPath, err := writeJSON(cfg.Path, pf)
+	outPath, plainPath, err := writeArtifacts(cfg, pf, raw.PlainText)
 	if err != nil {
-		return nil, fail("failed to write parsed.json", err)
+		return nil, fail("failed to write artifacts", err)
 	}
 	res.ParsedFilePath = outPath
+	res.PlainTextPath = plainPath
 
 	emit(StageDone, "document ready", func(p *ParseProgress) {
 		p.SectionsFound = total
@@ -312,31 +315,6 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 // helpers
 // ---------------------------------------------------------------------------
 
-func buildWindows(sections []Section, size int) (start, end string) {
-	var buf []byte
-	var walk func([]Section)
-	walk = func(ss []Section) {
-		for _, s := range ss {
-			if s.Label != "" {
-				buf = append(buf, s.Label...)
-				buf = append(buf, '\n')
-			}
-			if s.Text != "" {
-				buf = append(buf, s.Text...)
-				buf = append(buf, '\n')
-			}
-			walk(s.Children)
-		}
-	}
-	walk(sections)
-
-	full := string(buf)
-	if len(full) <= size {
-		return full, full
-	}
-	return full[:size], full[len(full)-size:]
-}
-
 func countSections(ss []Section) int {
 	n := len(ss)
 	for _, s := range ss {
@@ -345,14 +323,25 @@ func countSections(ss []Section) int {
 	return n
 }
 
-func writeJSON(originalPath string, v any) (string, error) {
-	out := filepath.Join(filepath.Dir(originalPath), "parsed.json")
-	data, err := json.MarshalIndent(v, "", "  ")
+func writeArtifacts(cfg PipelineConfig, parsed any, plain string) (parsedPath, plainPath string, err error) {
+	plainPath = filepath.Join(cfg.DataPath, "plain", cfg.FileID)
+	if err = os.MkdirAll(filepath.Dir(plainPath), 0755); err != nil {
+		return "", "", fmt.Errorf("mkdir plain: %w", err)
+	}
+	if err = os.WriteFile(plainPath, []byte(plain), 0644); err != nil {
+		return "", "", fmt.Errorf("write plain: %w", err)
+	}
+
+	parsedPath = filepath.Join(cfg.DataPath, "legistoso", cfg.FileID)
+	if err = os.MkdirAll(filepath.Dir(parsedPath), 0755); err != nil {
+		return "", "", fmt.Errorf("mkdir legistoso: %w", err)
+	}
+	data, err := json.MarshalIndent(parsed, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
+		return "", "", fmt.Errorf("marshal: %w", err)
 	}
-	if err = os.WriteFile(out, data, 0644); err != nil {
-		return "", fmt.Errorf("write: %w", err)
+	if err = os.WriteFile(parsedPath, data, 0644); err != nil {
+		return "", "", fmt.Errorf("write: %w", err)
 	}
-	return out, nil
+	return parsedPath, plainPath, nil
 }

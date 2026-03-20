@@ -18,6 +18,7 @@ type FileFilter struct {
 	UserID     *string // nil = public (user_id IS NULL)
 	DocumentID *string // nil = no filter
 	Status     string  // "" = no filter
+	MimeType   string  // "" = no filter
 }
 
 // FileMetaUpdate carries Expression-level fields written back after LLM.
@@ -77,6 +78,10 @@ func (s *FileStore) List(filter FileFilter, p pagination.Params) ([]File, error)
 	if filter.Status != "" {
 		q.WriteString(` AND status = ?`)
 		args = append(args, filter.Status)
+	}
+	if filter.MimeType != "" {
+		q.WriteString(` AND mime_type = ?`)
+		args = append(args, filter.MimeType)
 	}
 	if p.StartingAfter != "" {
 		q.WriteString(` AND (created_at < (SELECT created_at FROM files WHERE id = ?)

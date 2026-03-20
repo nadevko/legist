@@ -48,6 +48,7 @@ type filePatchRequest struct {
 // @Produce     json
 // @Param       owner          query  string   false "omit=current user, public=laws only"
 // @Param       document_id    query  string   false "Forward to /documents/:id/files"
+// @Param       type           query  string   false "pdf|docx"
 // @Param       status         query  string   false "pending|processing|done|failed"
 // @Param       limit          query  int      false "Limit (default 20, max 100)"
 // @Param       starting_after query  string   false "Cursor"
@@ -74,6 +75,7 @@ func (s *Server) handleListFiles(c echo.Context) error {
 // @Security    BearerAuth
 // @Produce     json
 // @Param       id             path   string   true  "Document ID"
+// @Param       type           query  string   false "pdf|docx"
 // @Param       status         query  string   false "pending|processing|done|failed"
 // @Param       limit          query  int      false "Limit"
 // @Param       starting_after query  string   false "Cursor"
@@ -99,6 +101,14 @@ func (s *Server) listFilesCore(c echo.Context, documentID *string) error {
 	}
 
 	filter := store.FileFilter{Status: c.QueryParam("status")}
+	if typ := strings.TrimSpace(c.QueryParam("type")); typ != "" {
+		mime, ok := typeToMime(typ)
+		if !ok {
+			return errorf(http.StatusBadRequest, "invalid_parameter_value",
+				"type must be 'pdf' or 'docx'", "type")
+		}
+		filter.MimeType = mime
+	}
 
 	switch c.QueryParam("owner") {
 	case "public":
@@ -159,12 +169,12 @@ func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 			"file is not yet parsed (status: "+f.Status+")")
 	}
 
-	parsedPath := filepath.Join(filepath.Dir(f.Path), "parsed.json")
+	parsedPath := filepath.Join(s.cfg.DataPath, "legistoso", f.ID)
 	data, err := os.ReadFile(parsedPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errorf(http.StatusNotFound, "resource_missing",
-				"parsed.json not found for file: "+f.ID)
+				"legistoso artifact not found for file: "+f.ID)
 		}
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
@@ -319,7 +329,26 @@ func (s *Server) handleDeleteFile(c echo.Context) error {
 			"file is currently being processed; wait for it to complete or fail")
 	}
 
-	if err = os.RemoveAll(filepath.Dir(f.Path)); err != nil {
+	sourceLink := filepath.Join(s.cfg.DataPath, "sources", f.ID)
+	targetPath, readErr := os.Readlink(sourceLink)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if err = os.Remove(sourceLink); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if targetPath == "" {
+		targetPath = filepath.Join(s.cfg.DataPath, fileTypeDir(f.MimeType), f.ID)
+	} else if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(filepath.Dir(sourceLink), targetPath)
+	}
+	if err = os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if err = os.Remove(filepath.Join(s.cfg.DataPath, "plain", f.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if err = os.Remove(filepath.Join(s.cfg.DataPath, "legistoso", f.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	if err = s.files.Delete(f.ID); err != nil {
@@ -333,9 +362,9 @@ func (s *Server) handleDeleteFile(c echo.Context) error {
 // Key is the broker channel (e.g. diff ID). DoneEvent/FailedEvent rename terminal events so
 // diff SSE streams do not end on per-file completion.
 type processFileChannel struct {
-	Key             string
-	DoneEvent       string // default "done"
-	FailedEvent     string // default "failed"
+	Key         string
+	DoneEvent   string // default "done"
+	FailedEvent string // default "failed"
 }
 
 // processFile runs the parse+extract pipeline in a goroutine.
@@ -395,6 +424,7 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 		FileID:     f.ID,
 		DocumentID: doc.ID,
 		Path:       f.Path,
+		DataPath:   s.cfg.DataPath,
 		MimeType:   f.MimeType,
 
 		KnownSubtype: doc.Subtype,
@@ -494,9 +524,19 @@ func (s *Server) saveFormFile(c echo.Context, fieldName string, documentID *stri
 	}
 
 	fileID := newID("file")
-	dir := filepath.Join(s.cfg.DataPath, "files", fileID)
-	dst := filepath.Join(dir, fh.Filename)
-	if err = saveFile(src, dir, dst); err != nil {
+	targetDir := filepath.Join(s.cfg.DataPath, fileTypeDir(mime))
+	targetPath := filepath.Join(targetDir, fileID)
+	if err = saveFile(src, targetDir, targetPath); err != nil {
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	sourceDir := filepath.Join(s.cfg.DataPath, "sources")
+	sourceLink := filepath.Join(sourceDir, fileID)
+	if err = os.MkdirAll(sourceDir, 0755); err != nil {
+		_ = os.Remove(targetPath)
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if err = os.Symlink(targetPath, sourceLink); err != nil {
+		_ = os.Remove(targetPath)
 		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
@@ -516,7 +556,8 @@ func (s *Server) saveFormFile(c echo.Context, fieldName string, documentID *stri
 			doc.Country = "by"
 		}
 		if err = s.documents.Create(doc); err != nil {
-			_ = os.RemoveAll(dir)
+			_ = os.Remove(sourceLink)
+			_ = os.Remove(targetPath)
 			if errors.Is(err, store.ErrDuplicate) {
 				return nil, nil, errorf(http.StatusConflict, "duplicate_document",
 					"document with this subtype, number and date already exists")
@@ -527,7 +568,8 @@ func (s *Server) saveFormFile(c echo.Context, fieldName string, documentID *stri
 	} else {
 		doc, err = s.documents.GetByID(*documentID)
 		if err != nil {
-			_ = os.RemoveAll(dir)
+			_ = os.Remove(sourceLink)
+			_ = os.Remove(targetPath)
 			return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 		}
 	}
@@ -540,13 +582,14 @@ func (s *Server) saveFormFile(c echo.Context, fieldName string, documentID *stri
 		Name:       fh.Filename,
 		MimeType:   mime,
 		Size:       fh.Size,
-		Path:       dst,
+		Path:       sourceLink,
 		Status:     "pending",
 	}
 	applyExpressionFields(f, req)
 
 	if err = s.files.Create(f); err != nil {
-		_ = os.RemoveAll(dir)
+		_ = os.Remove(sourceLink)
+		_ = os.Remove(targetPath)
 		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
@@ -643,6 +686,28 @@ func saveFile(src io.Reader, dir, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, src)
 	return err
+}
+
+func fileTypeDir(mime string) string {
+	switch mime {
+	case "application/pdf":
+		return "pdf"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return "docx"
+	default:
+		return "other"
+	}
+}
+
+func typeToMime(typ string) (string, bool) {
+	switch typ {
+	case "pdf":
+		return "application/pdf", true
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true
+	default:
+		return "", false
+	}
 }
 
 func strVal(p *string) string {

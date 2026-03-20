@@ -103,7 +103,7 @@ func (s *Server) runDiffComputation(diffID string) {
 
 	// Placeholder: real diff pipeline to be implemented later.
 	sim := 0.0
-	if err := s.diffs.UpdateResult(diffID, &sim, "[]", "done"); err != nil {
+	if err := s.diffs.UpdateResult(diffID, &sim, store.EmptyDiffData(), "done"); err != nil {
 		_ = s.diffs.UpdateStatus(diffID, "failed")
 		s.publishDiffEvent(diffID, "diff_failed", map[string]any{"diff_id": diffID, "error": "failed to persist diff result"})
 		s.dispatcher.Dispatch(webhook.EventDiffFailed, map[string]any{"id": diffID, "object": "diff"})

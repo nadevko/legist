@@ -97,8 +97,10 @@ legist/
 - Host hardcoded as `legist.nadevko.cc`
 
 ### File Storage
-- Originals: `data/files/{file_id}/{filename}`
-- Parsed JSON: `data/files/{file_id}/parsed.json`
+- Originals: `DATA_PATH/pdf/{file_id}` or `DATA_PATH/docx/{file_id}` (by mime)
+- Source links: `DATA_PATH/sources/{file_id}` → symlink to file in `pdf/` or `docx/`
+- Canonical plain text: `DATA_PATH/plain/{file_id}`
+- Legistoso artifact JSON: `DATA_PATH/legistoso/{file_id}`
 - Public laws (RAG base): `files.user_id IS NULL` in DB, populated by Python scripts
 - User files: `files.user_id = <user_id>`
 
@@ -107,10 +109,10 @@ All SSE events have shape: `{type: string, data: {...}}`
 
 Progress stages during file processing:
 - `parsing_started` — structure parsing started/completed (`sections_found` field)
-- `llm_requested` — metadata extraction request sent (`chars` field)
+- `llm_requested` — metadata extraction starts once first `LLM_METADATA_WINDOW` chars are available (`chars` field)
 - `llm_skipped` — LLM not needed, all metadata provided explicitly
 - `llm_done` — LLM responded (`meta_score`, `meta_ok` fields)
-- `saving` — writing parsed.json
+- `saving` — writing plain and legistoso artifacts
 - `done` — completed successfully
 - `failed` — failed with error (`error`, `missing_fields` fields)
 
@@ -282,10 +284,10 @@ GET    /documents/:id
 PATCH  /documents/:id             — update Work-level fields
 DELETE /documents/:id
 
-GET    /documents/:id/files       — list versions (canonical); alias: GET /files?document_id=:id
+GET    /documents/:id/files       — list versions (canonical); alias: GET /files?document_id=:id; supports ?type=pdf|docx
 POST   /documents/:id/files       — add version (canonical); alias: POST /files with document_id form field
 
-GET    /files                     — own files; ?document_id= forwards to /documents/:id/files
+GET    /files                     — own files; ?document_id= forwards to /documents/:id/files; supports ?type=pdf|docx
 POST   /files                     — upload + create new Document (409 on duplicate identity)
 GET    /files/:id                 — metadata / parsed artifact (`Accept: application/legistoso`) / download / SSE (via Accept)
 PATCH  /files/:id                 — update Expression-level fields (version_date, language, pub_*, etc.)
@@ -328,24 +330,26 @@ POST /files (multipart)
           DOCX: fumiama/go-docx (heading styles → hierarchy)
           PDF:  pdftotext path (no stdin — more reliable across poppler versions)
       → SSE: parsing_started (sections_found)
-      → buildWindows(sections, windowSize) → startWindow, endWindow
       → needLLM = any required Work field empty OR any Expression field empty
       → if needLLM:
-          → SSE: llm_requested
-          → go ExtractMeta(startWindow + "---" + endWindow)
+          → once first `LLM_METADATA_WINDOW` chars of plain text are ready: SSE llm_requested
+          → go ExtractMeta(firstN + "---" + firstN)   # early async request
               → qwen2.5:3b via Ollama /api/generate
               → retry up to MetadataMaxRetries, merge best results
               → validate each field (length, date format, npaLevel range)
-              → DeriveNPALevel(subtype, author) — always deterministic, never from LLM
+          → continue parsing document to the end regardless of LLM status
+          → at finalization, wait for LLM response if still running
           → SSE: llm_done (meta_score, meta_ok)
       → else: SSE: llm_skipped
       → validate required Work fields (subtype, number, date)
       → on missing: UpdateStatus("failed"), SSE failed, webhook file.failed, return
+      → DeriveNPALevel(subtype, author) — always deterministic, never from LLM
       → merge LLM results into Document (known fields win) → UpdateDocument
       → merge LLM results into File expression fields → UpdateFileMeta
-      → assemble parsed.json: {file_id, document_id, meta, sections, parsed_at, parser_version}
+      → assemble legistoso: {file_id, document_id, plain_text_path, plain_text_len, meta, sections[].chunks, parsed_at, parser_version}
       → SSE: saving
-      → write data/files/{file_id}/parsed.json
+      → write DATA_PATH/plain/{file_id}
+      → write DATA_PATH/legistoso/{file_id}
       → UpdateStatus("done")
       → SSE: done
       → dispatch webhook: file.parsed
@@ -355,7 +359,7 @@ Tracking options:
 1. `POST /files` + `Accept: text/event-stream` — sync, stream progress in response
 2. `POST /files` + `Accept: application/json` — async, poll `GET /files/:id`
 3. `GET /files/:id` + `Accept: text/event-stream` — subscribe at any time
-4. `GET /files/:id` with `Accept: application/legistoso` — fetch parsed.json when done
+4. `GET /files/:id` with `Accept: application/legistoso` — fetch legistoso artifact when done
 5. Webhooks — `file.parsed` / `file.failed` events
 
 ## Diff Pipeline (planned)
