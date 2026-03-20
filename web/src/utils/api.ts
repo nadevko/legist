@@ -6,21 +6,34 @@ export const getApiUrl = (path: string) => {
 }
 
 // ✅ Добавлен Network Timeout (30 секунд)
-export const apiFetch = async (path: string, options?: RequestInit, timeout = 30000) => {
+export const apiFetch = async (path: string, options: RequestInit = {}, timeout = 30000) => {
   const url = getApiUrl(path)
+
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
+  // ✅ берём токен
+  const token = localStorage.getItem('legist_token')
+
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal })
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
+    })
+
     clearTimeout(timeoutId)
     return res
   } catch (err) {
     clearTimeout(timeoutId)
-    // Если ошибка из-за timeout, показываем понятное сообщение
+
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('Запрос заняло слишком много времени (30 сек). Проверьте интернет-соединение.')
     }
+
     throw err
   }
 }
