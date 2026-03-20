@@ -112,6 +112,8 @@ definitions:
         type: string
       complete:
         type: boolean
+      contract_type:
+        type: string
       country:
         type: string
       created:
@@ -119,6 +121,8 @@ definitions:
       date:
         type: string
       id:
+        type: string
+      jurisdiction:
         type: string
       name:
         type: string
@@ -128,7 +132,22 @@ definitions:
         type: string
       object:
         type: string
+      rag_categories:
+        items:
+          type: string
+        type: array
+      rag_keywords:
+        items:
+          type: string
+        type: array
+      rag_tags:
+        description: RAG Work-level metadata for retrieval / filtering.
+        items:
+          type: string
+        type: array
       subtype:
+        type: string
+      summary:
         type: string
       user_id:
         type: string
@@ -223,6 +242,34 @@ definitions:
         description: '"list"'
         type: string
     type: object
+  api.listResponse-api_regexOmitRuleResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.regexOmitRuleResponse'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: string
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  api.listResponse-api_regexWeightRuleResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.regexWeightRuleResponse'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: string
+      object:
+        description: '"list"'
+        type: string
+    type: object
   api.listResponse-api_sessionResponse:
     properties:
       data:
@@ -293,6 +340,80 @@ definitions:
       refresh_token:
         example: a3f1...
         type: string
+    type: object
+  api.regexOmitReplaceRequest:
+    properties:
+      rules:
+        items:
+          $ref: '#/definitions/api.regexOmitRuleCreateRequest'
+        type: array
+    type: object
+  api.regexOmitRuleCreateRequest:
+    properties:
+      enabled:
+        type: boolean
+      regex:
+        type: string
+    type: object
+  api.regexOmitRulePatchRequest:
+    properties:
+      enabled:
+        type: boolean
+      regex:
+        type: string
+    type: object
+  api.regexOmitRuleResponse:
+    properties:
+      created:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      object:
+        type: string
+      regex:
+        type: string
+    type: object
+  api.regexWeightReplaceRequest:
+    properties:
+      rules:
+        items:
+          $ref: '#/definitions/api.regexWeightRuleCreateRequest'
+        type: array
+    type: object
+  api.regexWeightRuleCreateRequest:
+    properties:
+      enabled:
+        type: boolean
+      regex:
+        type: string
+      weight:
+        type: number
+    type: object
+  api.regexWeightRulePatchRequest:
+    properties:
+      enabled:
+        type: boolean
+      regex:
+        type: string
+      weight:
+        type: number
+    type: object
+  api.regexWeightRuleResponse:
+    properties:
+      created:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      object:
+        type: string
+      regex:
+        type: string
+      weight:
+        type: number
     type: object
   api.registerRequest:
     properties:
@@ -998,6 +1119,11 @@ paths:
         in: formData
         name: pub_number
         type: string
+      - description: 'If true: parse lazily (start parsing only when creating a diff).
+          Default=false.'
+        in: formData
+        name: lazy
+        type: boolean
       - description: application/json | text/event-stream
         in: header
         name: Accept
@@ -1146,6 +1272,11 @@ paths:
         in: formData
         name: pub_number
         type: string
+      - description: 'If true: parse lazily (start parsing only when creating a diff).
+          Default=false.'
+        in: formData
+        name: lazy
+        type: boolean
       - description: application/json | text/event-stream
         in: header
         name: Accept
@@ -1294,6 +1425,274 @@ paths:
               type: string
             type: object
       summary: Health check
+      tags:
+      - System
+  /regex/omits:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexOmitRuleResponse'
+      security:
+      - BearerAuth: []
+      summary: Reset all regex omit rules to template
+      tags:
+      - System
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexOmitRuleResponse'
+      security:
+      - BearerAuth: []
+      summary: List regex omit rules
+      tags:
+      - System
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexOmitRuleCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.regexOmitRuleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create regex omit rule
+      tags:
+      - System
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rules payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexOmitReplaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexOmitRuleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace all regex omit rules
+      tags:
+      - System
+  /regex/omits/{id}:
+    delete:
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete regex omit rule
+      tags:
+      - System
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexOmitRulePatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.regexOmitRuleResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update regex omit rule
+      tags:
+      - System
+  /regex/weights:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexWeightRuleResponse'
+      security:
+      - BearerAuth: []
+      summary: Reset all regex weight rules to template
+      tags:
+      - System
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexWeightRuleResponse'
+      security:
+      - BearerAuth: []
+      summary: List regex weight rules
+      tags:
+      - System
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexWeightRuleCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.regexWeightRuleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create regex weight rule
+      tags:
+      - System
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rules payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexWeightReplaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_regexWeightRuleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace all regex weight rules
+      tags:
+      - System
+  /regex/weights/{id}:
+    delete:
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deletedResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete regex weight rule
+      tags:
+      - System
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.regexWeightRulePatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.regexWeightRuleResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update regex weight rule
       tags:
       - System
   /sessions:
