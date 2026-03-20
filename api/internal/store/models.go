@@ -75,6 +75,14 @@ type Document struct {
 	Name     string `db:"name"`
 	NPALevel int    `db:"npa_level"`
 
+	// RAG enrichment (Work-level): JSON arrays stored as TEXT in SQLite.
+	RagTags       string `db:"rag_tags"`
+	RagCategories string `db:"rag_categories"`
+	RagKeywords   string `db:"rag_keywords"`
+	RagSummary    string `db:"rag_summary"`
+	Jurisdiction  string `db:"jurisdiction"`
+	ContractType  string `db:"contract_type"`
+
 	CreatedAt time.Time `db:"created_at"`
 }
 

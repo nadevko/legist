@@ -1,0 +1,27 @@
+[
+  {
+    "regex": "(?i)\\bстр\\.?\\s*\\d+\\b",
+    "enabled": true
+  },
+  {
+    "regex": "(?i)\\bстраница\\s*\\d+\\b",
+    "enabled": true
+  },
+  {
+    "regex": "(?i)\\bстраниц[аы]\\s*\\d+\\b",
+    "enabled": true
+  },
+  {
+    "regex": "\\b\\d{1,2}\\.\\d{1,2}\\.\\d{4}\\b",
+    "enabled": true
+  },
+  {
+    "regex": "\\b\\d{4}\\.\\d{1,2}\\.\\d{1,2}\\b",
+    "enabled": true
+  },
+  {
+    "regex": "(?i)\\b№\\s*\\d+\\b",
+    "enabled": false
+  }
+]
+

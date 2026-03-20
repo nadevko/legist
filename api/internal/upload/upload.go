@@ -37,6 +37,10 @@ type FormData struct {
 	PubDate   string `form:"pub_date"`
 	PubNumber string `form:"pub_number"`
 
+	// Lazy controls whether file parsing (processFile) should be started immediately.
+	// If omitted, defaults to false (parse immediately).
+	Lazy bool `form:"lazy"`
+
 	// Chunk matching (diff) parameters. Nil = use env defaults.
 	MatchThresholdLow  *float64 `form:"match_threshold_low"`
 	MatchThresholdHigh *float64 `form:"match_threshold_high"`

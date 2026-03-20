@@ -78,6 +78,87 @@ func (s *Server) fileParseSucceeded(fileID string) bool {
 	return err == nil && f.Status == "done"
 }
 
+func (s *Server) ensureFileReadyForDiff(f *store.File, doc *store.Document, pch *processFileChannel) error {
+	// Poll file status; if it is pending, claim it and run parsing synchronously
+	// so diff SSE can stream progress (when pch points to diffID).
+	const pollInterval = 300 * time.Millisecond
+
+	publishFileDone := func() {
+		if pch == nil || pch.Key == "" {
+			return
+		}
+		doneEvent := pch.DoneEvent
+		if doneEvent == "" {
+			doneEvent = "file_done"
+		}
+		s.broker.Publish(pch.Key, sse.Event{
+			Type: doneEvent,
+			Data: map[string]any{"file_id": f.ID, "status": "done"},
+		})
+	}
+
+	publishFileFailed := func(errMsg string) {
+		if pch == nil || pch.Key == "" {
+			return
+		}
+		failedEvent := pch.FailedEvent
+		if failedEvent == "" {
+			failedEvent = "file_failed"
+		}
+		s.broker.Publish(pch.Key, sse.Event{
+			Type: failedEvent,
+			Data: map[string]any{"file_id": f.ID, "error": errMsg},
+		})
+	}
+
+	ranParse := false
+
+	for {
+		cur, err := s.files.GetByID(f.ID)
+		if err != nil {
+			return fmt.Errorf("load file for diff: %w", err)
+		}
+
+		if cur.DocumentID == nil || *cur.DocumentID != doc.ID {
+			return fmt.Errorf("file %s belongs to a different document", cur.ID)
+		}
+
+		switch cur.Status {
+		case "done":
+			if !ranParse {
+				publishFileDone()
+			}
+			return nil
+		case "failed":
+			if !ranParse {
+				publishFileFailed("file parsing failed")
+			}
+			return fmt.Errorf("file %s parsing failed", cur.ID)
+		case "processing":
+			time.Sleep(pollInterval)
+			continue
+		case "pending":
+			claimed, err := s.files.UpdateStatusIf(cur.ID, "pending", "processing")
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				// Another worker claimed it; re-check state.
+				time.Sleep(pollInterval)
+				continue
+			}
+			// Run parse+embed in the current goroutine so matching starts only after readiness.
+			ranParse = true
+			s.processFileWithChannel(cur, doc, pch)
+			// Loop will re-check DB status (done/failed).
+			continue
+		default:
+			// Treat unknown statuses conservatively.
+			time.Sleep(pollInterval)
+		}
+	}
+}
+
 // runDiffPendingFiles runs the file pipeline for each pending file in order, then runDiffComputation.
 // preamble runs once before the first file (e.g. document_* SSE for two-file upload).
 func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *processFileChannel, preamble func(), files []*store.File, lowThreshold float64, highThreshold float64) {
@@ -85,8 +166,7 @@ func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *pr
 		preamble()
 	}
 	for i, f := range files {
-		s.processFileWithChannel(f, doc, pch)
-		if !s.fileParseSucceeded(f.ID) {
+		if err := s.ensureFileReadyForDiff(f, doc, pch); err != nil {
 			msg := "file processing failed"
 			if len(files) == 2 && i == 0 {
 				msg = "left file processing failed"
@@ -94,7 +174,8 @@ func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *pr
 			if len(files) == 2 && i == 1 {
 				msg = "right file processing failed"
 			}
-			s.markDiffFailed(diffID, msg)
+			_ = err // keep original message in SSE payload below
+			s.markDiffFailed(diffID, msg+": "+err.Error())
 			return
 		}
 	}
@@ -105,6 +186,24 @@ func (s *Server) respondDiffCreated(c echo.Context, d *store.Diff) error {
 	if c.Request().Header.Get("Accept") == "text/event-stream" {
 		return sse.Stream(c, s.broker, d.ID, "diff_done", "diff_failed")
 	}
+	return c.JSON(http.StatusCreated, toDiffResponse(*d))
+}
+
+func (s *Server) respondDiffCreatedWithStart(c echo.Context, d *store.Diff, startFn func()) error {
+	if c.Request().Header.Get("Accept") == "text/event-stream" {
+		// Subscribe first to avoid losing early events (diff_started/file_done/...).
+		return sse.StreamWithInitialEvent(
+			c,
+			s.broker,
+			d.ID,
+			"",
+			nil,
+			startFn,
+			"diff_done",
+			"diff_failed",
+		)
+	}
+	startFn()
 	return c.JSON(http.StatusCreated, toDiffResponse(*d))
 }
 
@@ -140,6 +239,8 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 		return
 	}
 
+	doc, _ := s.documents.GetByID(d.DocumentID)
+
 	// Clamp to sane range.
 	if lowThreshold < 0 {
 		lowThreshold = 0
@@ -161,18 +262,30 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 	leftPath := filepath.Join(s.cfg.DataPath, "lessed", d.LeftFileID)
 	rightPath := filepath.Join(s.cfg.DataPath, "lessed", d.RightFileID)
 
+	weightRules, err := s.regexRules.ListWeightRules()
+	if err != nil {
+		fail("failed to load weight regex rules", err)
+		return
+	}
+	omitRules, err := s.regexRules.ListOmitRules()
+	if err != nil {
+		fail("failed to load omit regex rules", err)
+		return
+	}
+
 	embedCfg := embedder.Config{
 		OllamaBaseURL:            s.cfg.OllamaBaseURL,
 		Model:                    s.cfg.EmbedModel,
 		BatchSize:                s.cfg.EmbedBatchSize,
 		ShortChunkPrefixMaxChars: s.cfg.EmbedShortChunkPrefixMaxChars,
 		UseWeightPrefix:          s.cfg.EmbedUseWeightPrefix,
+		WeightRules:             weightRules,
+		OmitRules:               omitRules,
 		WeightCritical:           s.cfg.WeightCritical,
 		WeightMain:               s.cfg.WeightMain,
 		WeightStandard:           s.cfg.WeightStandard,
 		WeightTechnical:          s.cfg.WeightTechnical,
 		WeightMaxCap:             s.cfg.WeightMaxCap,
-		EmbeddingContextHash:     s.cfg.EmbeddingContextHash,
 		ProgressInterval:         time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
 		HTTPTimeout:              time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
 	}
@@ -309,15 +422,29 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 		normsR[j] = n
 	}
 
-	// Regex rules are only used for matches with sim in the risk zone: low <= sim < high.
-	var regexRules []DiffMatchRegexRule
-	if s.cfg.DiffMatchRegexFile != "" && highThreshold > lowThreshold {
-		rules, err := loadDiffMatchRegexRules(s.cfg.DiffMatchRegexFile)
-		if err != nil {
-			fail("failed to load diff match regex rules", err)
-			return
+	// `regex/omits` is pre-processing before embedding/matching:
+	// - a chunk is "skipped" when its cleaned text becomes empty
+	// - skipped chunks do not participate in matching and do not affect similarity_percent denominator
+	omitPatterns := make([]string, 0, len(omitRules))
+	for _, r := range omitRules {
+		if !r.Enabled {
+			continue
 		}
-		regexRules = rules
+		omitPatterns = append(omitPatterns, r.Regex)
+	}
+	compiledOmitRules, err := parser.CompileOmitRules(omitPatterns)
+	if err != nil {
+		fail("invalid omit regex in DB", err)
+		return
+	}
+
+	skippedLeft := make([]bool, NLeft)
+	for i := 0; i < NLeft; i++ {
+		skippedLeft[i] = parser.CleanText(leftContents[i], compiledOmitRules) == ""
+	}
+	skippedRight := make([]bool, NRight)
+	for j := 0; j < NRight; j++ {
+		skippedRight[j] = parser.CleanText(rightContents[j], compiledOmitRules) == ""
 	}
 
 	candidates := make([]edge, 0)
@@ -327,9 +454,15 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 
 	// Compute similarities and build candidate edges.
 	for i := 0; i < NLeft; i++ {
+		if skippedLeft[i] {
+			continue
+		}
 		li := leftEmb[i]
 		ni := normsL[i]
 		for j := 0; j < NRight; j++ {
+			if skippedRight[j] {
+				continue
+			}
 			rj := rightEmb[j]
 			dot := floats.Dot(li, rj)
 			sim := dot / (ni * normsR[j])
@@ -380,25 +513,8 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 		matchedPairs++
 	}
 
-	// Risk-zone filtering: for matches with lowThreshold <= sim < highThreshold,
-	// run word-level diff + regex on changed fragments.
-	if highThreshold > lowThreshold && len(regexRules) > 0 {
-		for i := 0; i < NLeft; i++ {
-			if leftMatches[i] == nil {
-				continue
-			}
-			if leftMatchSims[i] >= highThreshold {
-				continue
-			}
-			j := *leftMatches[i]
-			if !diffMatchRegexMatchesDelta(leftContents[i], rightContents[j], regexRules) {
-				leftMatches[i] = nil
-				rightMatches[j] = nil
-			}
-		}
-	}
-
-	// Recount matched pairs after risk-zone filtering.
+	// Omit pre-processing happens before embedding; skipped chunks do not participate in matching.
+	// So there is no separate risk-zone filtering step here.
 	matchedPairs = 0
 	for i := 0; i < NLeft; i++ {
 		if leftMatches[i] != nil {
@@ -407,14 +523,20 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 	}
 
 	sumWeightsLeft := 0.0
-	for _, w := range leftWeights {
+	for i, w := range leftWeights {
+		if skippedLeft[i] {
+			continue
+		}
 		if w <= 0 {
 			w = 1.0
 		}
 		sumWeightsLeft += w
 	}
 	sumWeightsRight := 0.0
-	for _, w := range rightWeights {
+	for j, w := range rightWeights {
+		if skippedRight[j] {
+			continue
+		}
 		if w <= 0 {
 			w = 1.0
 		}
@@ -423,7 +545,7 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 	denom := math.Max(sumWeightsLeft, sumWeightsRight)
 	weightedNumerator := 0.0
 	for i := 0; i < NLeft; i++ {
-		if leftMatches[i] == nil {
+		if leftMatches[i] == nil || skippedLeft[i] {
 			continue
 		}
 		w := leftWeights[i]
@@ -436,6 +558,13 @@ func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThr
 	if denom > 0 {
 		simPercent = (weightedNumerator / denom) * 100.0
 	}
+
+	// rag-diff stage (best-effort): build a JSON report for on-demand DOCX rendering.
+	s.runRagDiffStage(ctx, diffID, d, doc, leftPF, rightPF,
+		leftContents, rightContents,
+		leftWeights, rightWeights,
+		leftMatches, leftMatchSims,
+	)
 
 	type diffMatchingData struct {
 		Params struct {
@@ -602,9 +731,19 @@ func (s *Server) createDiffFromIDs(c echo.Context, req upload.FormData, leftID, 
 		return errorf(http.StatusBadRequest, "invalid_request",
 			"both files must belong to the same document", "right_file_id")
 	}
-	if left.Status != "done" || right.Status != "done" {
+
+	// Fail fast if either side already failed.
+	if left.Status == "failed" || right.Status == "failed" {
 		return errorf(http.StatusConflict, "not_ready",
-			"both files must have status done before diffing")
+			"one of the files already failed; cannot diff")
+	}
+
+	doc, err := s.documents.GetByID(*left.DocumentID)
+	if err != nil {
+		if store.IsNotFound(err) {
+			return errorf(http.StatusNotFound, "resource_missing", "document not found")
+		}
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
 	uid := auth.UserID(c)
@@ -622,9 +761,12 @@ func (s *Server) createDiffFromIDs(c echo.Context, req upload.FormData, leftID, 
 	}
 	s.dispatcher.Dispatch(webhook.EventDiffCreated, toDiffResponse(*d))
 
-	go s.runDiffComputation(d.ID, lowThreshold, highThreshold)
+	pch := diffProcessingChannel(d.ID)
+	startFn := func() {
+		s.runDiffPendingFiles(d.ID, doc, pch, nil, []*store.File{left, right}, lowThreshold, highThreshold)
+	}
 
-	return s.respondDiffCreated(c, d)
+	return s.respondDiffCreatedWithStart(c, d, startFn)
 }
 
 func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, leftID, rightID string, lowThreshold float64, highThreshold float64) error {
@@ -652,12 +794,12 @@ func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, le
 	if err = s.ensureFileReadable(c, existing); err != nil {
 		return err
 	}
-	if existing.Status != "done" {
-		return errorf(http.StatusConflict, "not_ready",
-			"existing file must have status done")
-	}
 	if existing.DocumentID == nil {
 		return errorf(http.StatusBadRequest, "invalid_request", "file has no document", "left_file_id")
+	}
+	if existing.Status == "failed" {
+		return errorf(http.StatusConflict, "not_ready",
+			"existing file parsing failed; cannot diff")
 	}
 
 	doc, err := s.documents.GetByID(*existing.DocumentID)
@@ -675,12 +817,17 @@ func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, le
 	}
 
 	var leftFileID, rightFileID string
+	var leftFile, rightFile *store.File
 	if newIsRight {
 		leftFileID = existingID
 		rightFileID = newF.ID
+		leftFile = existing
+		rightFile = newF
 	} else {
 		leftFileID = newF.ID
 		rightFileID = existingID
+		leftFile = newF
+		rightFile = existing
 	}
 
 	uid := auth.UserID(c)
@@ -702,11 +849,11 @@ func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, le
 	s.dispatcher.Dispatch(webhook.EventDiffCreated, toDiffResponse(*d))
 
 	pch := diffProcessingChannel(d.ID)
-	go func(newFile *store.File, doc *store.Document, diffID string) {
-		s.runDiffPendingFiles(diffID, doc, pch, nil, []*store.File{newFile}, lowThreshold, highThreshold)
-	}(newF, doc, d.ID)
+	startFn := func() {
+		s.runDiffPendingFiles(d.ID, doc, pch, nil, []*store.File{leftFile, rightFile}, lowThreshold, highThreshold)
+	}
 
-	return s.respondDiffCreated(c, d)
+	return s.respondDiffCreatedWithStart(c, d, startFn)
 }
 
 func (s *Server) createDiffFromTwoFiles(c echo.Context, req upload.FormData, lowThreshold float64, highThreshold float64) error {
@@ -748,9 +895,11 @@ func (s *Server) createDiffFromTwoFiles(c echo.Context, req upload.FormData, low
 		s.publishDiffEvent(diffID, "document_will_be_created", map[string]any{"diff_id": diffID})
 		s.publishDiffEvent(diffID, "document_created", map[string]any{"diff_id": diffID, "document_id": doc.ID})
 	}
-	go s.runDiffPendingFiles(diffID, doc, pch, preamble, []*store.File{fLeft, fRight}, lowThreshold, highThreshold)
+	startFn := func() {
+		s.runDiffPendingFiles(diffID, doc, pch, preamble, []*store.File{fLeft, fRight}, lowThreshold, highThreshold)
+	}
 
-	return s.respondDiffCreated(c, d)
+	return s.respondDiffCreatedWithStart(c, d, startFn)
 }
 
 // ensureFileReadable returns 404 if the file is not readable by the current user.

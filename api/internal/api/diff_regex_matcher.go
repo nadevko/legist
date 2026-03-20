@@ -1,8 +1,6 @@
 package api
 
 import (
-	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -14,42 +12,6 @@ import (
 type DiffMatchRegexRule struct {
 	Tag     string
 	Pattern *regexp.Regexp
-}
-
-// loadDiffMatchRegexRules parses and compiles regex rules from a newline-delimited file.
-func loadDiffMatchRegexRules(path string) ([]DiffMatchRegexRule, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read regex file: %w", err)
-	}
-
-	lines := strings.Split(string(raw), "\n")
-	rules := make([]DiffMatchRegexRule, 0, len(lines))
-	for idx, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Allow comments.
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid regex rule format at line %d: expected TAG|REGEXP", idx+1)
-		}
-		tag := strings.TrimSpace(parts[0])
-		pat := strings.TrimSpace(parts[1])
-		if tag == "" || pat == "" {
-			continue
-		}
-		re, err := regexp.Compile(pat)
-		if err != nil {
-			return nil, fmt.Errorf("invalid regexp at line %d (tag=%q): %w", idx+1, tag, err)
-		}
-		rules = append(rules, DiffMatchRegexRule{Tag: tag, Pattern: re})
-	}
-	return rules, nil
 }
 
 // diffMatchRegexMatchesDelta checks whether regex rules match at least one changed fragment

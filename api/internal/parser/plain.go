@@ -74,3 +74,14 @@ func firstNRunes(s string, n int) string {
 	}
 	return string(r[:n])
 }
+
+func lastNRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[len(r)-n:])
+}

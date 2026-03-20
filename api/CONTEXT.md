@@ -95,7 +95,7 @@ legist/
 ### Configuration — performance and network
 - Any setting that **materially affects performance or network load** (batch sizes, HTTP timeouts to LLM/embed services, retry counts, SSE progress throttle intervals, window sizes, etc.) MUST be driven by **environment variables** documented in `internal/config/config.go` — avoid hard-coding such values in application code.
 - Examples: `LLM_METADATA_WINDOW`, `LLM_METADATA_RETRIES`, `METADATA_LLM_HTTP_TIMEOUT_MS`; chunk embedding: `EMBED_BATCH_SIZE`, `EMBED_PROGRESS_INTERVAL_MS`, `EMBED_HTTP_TIMEOUT_MS` (see `internal/config/config.go`).
-- Diff chunk matching (Stage 3 `matching`): `DIFF_MATCH_THRESHOLD_LOW` (hard candidate cut), `DIFF_MATCH_THRESHOLD_HIGH` (keep cut in risk-zone), `DIFF_MATCH_REGEX_FILE` (optional newline-delimited `TAG|REGEXP` rules).
+- Diff chunk matching (Stage 3 `matching`): `DIFF_MATCH_THRESHOLD_LOW` (hard candidate cut), `DIFF_MATCH_THRESHOLD_HIGH` (currently passed to output only), `DIFF_MATCH_REGEX_FILE` (JSON seed array for `/regex/omits` rules; applied as pre-processing before embedding/matching and drives "skip empty after cleaning").
 - Weighted chunking/embedding: `WEIGHT_CRITICAL`, `WEIGHT_MAIN`, `WEIGHT_STANDARD`, `WEIGHT_TECHNICAL`, `WEIGHT_MAX_CAP`; embedding prefix controls: `EMBED_USE_WEIGHT_PREFIX`, `EMBED_SHORT_CHUNK_PREFIX_MAX_CHARS`.
 - **LLM prompt text** is not hard-coded in Go: set **`METADATA_LLM_PROMPT_FILE`** to a UTF-8 file path (full instructions ending before the document fragment is appended). If unset, the bundled **`internal/config/metadata_prompt_default.txt`** (embedded at build time) is used.
 
@@ -482,8 +482,8 @@ services.qdrant = {
 ```bash
 ADDR=:8080
 ENV=dev                          # dev enables CORS
-DB_PATH=../data/legist.sqlite
 DATA_PATH=../data
+# SQLite DB is stored at: $DATA_PATH/db.sqlite
 JWT_SECRET=...
 PUBLIC_HOST=legist.nadevko.cc    # swagger base URL
 

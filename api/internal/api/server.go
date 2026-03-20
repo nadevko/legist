@@ -25,6 +25,7 @@ type Server struct {
 	documents   *store.DocumentStore
 	diffs       *store.DiffStore
 	idempotency *store.IdempotencyStore
+	regexRules  *store.RegexRulesStore
 	webhooks    *store.WebhookStore
 	dispatcher  *webhook.Dispatcher
 	broker      *sse.Broker
@@ -43,6 +44,7 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 		documents:   store.NewDocumentStore(db),
 		diffs:       store.NewDiffStore(db),
 		idempotency: store.NewIdempotencyStore(db),
+		regexRules:  store.NewRegexRulesStore(db),
 		webhooks:    webhookStore,
 		dispatcher:  webhook.NewDispatcher(webhookStore),
 		broker:      sse.NewBroker(),
@@ -127,6 +129,24 @@ func (s *Server) registerRoutes() {
 	p.POST("/diffs", s.handleCreateDiff)
 	p.GET("/diffs", s.handleListDiffs)
 	p.GET("/diffs/:id", s.handleGetDiff)
+
+	// reports (RAG annotated diff -> optional docx)
+	p.GET("/reports/:diff_id", s.handleGetReport)
+
+	// regex rules (admin)
+	p.GET("/regex/weights", s.handleListWeightRegexRules)
+	p.PUT("/regex/weights", s.handleReplaceWeightRegexRules)
+	p.POST("/regex/weights", s.handleCreateWeightRegexRule)
+	p.DELETE("/regex/weights", s.handleResetWeightRegexRules)
+	p.PATCH("/regex/weights/:id", s.handleUpdateWeightRegexRule)
+	p.DELETE("/regex/weights/:id", s.handleDeleteWeightRegexRule)
+
+	p.GET("/regex/omits", s.handleListOmitRegexRules)
+	p.PUT("/regex/omits", s.handleReplaceOmitRegexRules)
+	p.POST("/regex/omits", s.handleCreateOmitRegexRule)
+	p.DELETE("/regex/omits", s.handleResetOmitRegexRules)
+	p.PATCH("/regex/omits/:id", s.handleUpdateOmitRegexRule)
+	p.DELETE("/regex/omits/:id", s.handleDeleteOmitRegexRule)
 
 	// webhooks
 	p.POST("/webhooks", s.handleCreateWebhook)

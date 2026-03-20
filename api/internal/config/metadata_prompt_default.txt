@@ -51,7 +51,12 @@ JSON schema (null for unknown fields):
   "classification": {
     "keywords":   string[] | null,
     "dictionary": string | null
-  } | null
+  } | null,
+  "rag_tags":       string[] | null,       // key themes for retrieval (e.g. "liability", "tax")
+  "rag_categories": string[] | null,       // legal category group (e.g. "civil", "labor")
+  "summary":        string | null,         // short summary (<= 300 chars)
+  "jurisdiction":  string | null,         // region/country code (e.g. "by", "RU")
+  "contract_type": string | null          // specific document subtype (e.g. "NDA")
 }
 
 Document fragment:

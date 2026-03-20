@@ -110,6 +110,88 @@ func Stream(c echo.Context, b *Broker, key string, terminalTypes ...string) erro
 		}
 	}
 }
+
+// StreamWithInitialEvent streams SSE events from broker (by key) and guarantees that
+// the `initial` event is written to the response right after subscribing and before
+// reading from broker channels.
+//
+// If `initialType` is present in `terminalTypes`, the function returns immediately
+// after writing the initial event (useful for "lazy upload" where we only want to
+// report successful upload and close the stream).
+func StreamWithInitialEvent(
+	c echo.Context,
+	b *Broker,
+	key string,
+	initialType string,
+	initialData any,
+	afterSubscribe func(),
+	terminalTypes ...string,
+) error {
+	term := terminalTypes
+	if len(term) == 0 {
+		term = []string{"done", "failed"}
+	}
+
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("X-Accel-Buffering", "no")
+	c.Response().WriteHeader(http.StatusOK)
+
+	ch, unsub := b.Subscribe(key)
+	defer unsub()
+
+	// Write initial event before starting to forward events from broker.
+	if initialType != "" {
+		msg, err := Format(Event{Type: initialType, Data: initialData})
+		if err != nil {
+			return fmt.Errorf("format initial sse event: %w", err)
+		}
+		if _, err = fmt.Fprint(c.Response(), msg); err != nil {
+			return err
+		}
+		c.Response().Flush()
+	}
+
+	shouldTerminate := false
+	for _, t := range term {
+		if initialType != "" && initialType == t {
+			shouldTerminate = true
+			break
+		}
+	}
+	if shouldTerminate {
+		return nil
+	}
+
+	if afterSubscribe != nil {
+		afterSubscribe()
+	}
+
+	ctx := c.Request().Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case evt, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			msg, err := Format(evt)
+			if err != nil {
+				return fmt.Errorf("format sse event: %w", err)
+			}
+			if _, err = fmt.Fprint(c.Response(), msg); err != nil {
+				return err
+			}
+			c.Response().Flush()
+			for _, t := range term {
+				if evt.Type == t {
+					return nil
+				}
+			}
+		}
+	}
+}
 func Format(evt Event) (string, error) {
 	payload := struct {
 		Type string `json:"type"`

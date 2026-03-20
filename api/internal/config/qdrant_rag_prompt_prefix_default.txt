@@ -1,0 +1,5 @@
+Legal retrieval intent for Belarusian normative legal acts.
+The input text describes a change between two versions of an act (WAS/IS).
+Find and use the most relevant laws, articles, sections, and legal references
+related to this change. Return relevant provisions as Qdrant context.
+

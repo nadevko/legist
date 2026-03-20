@@ -137,6 +137,9 @@ type ParsedFile struct {
 	EmbeddingModel  string      `json:"embedding_model,omitempty"`
 	EmbeddingShortChunkPrefixMaxChars int    `json:"embedding_short_chunk_prefix_max_chars,omitempty"`
 	EmbeddingContextHash              string `json:"embedding_context_hash,omitempty"`
+
+	// ChunkEmbeddingInputHashes — one hash per chunk (DFS/chunk_content order) for embedding input string.
+	ChunkEmbeddingInputHashes []string `json:"chunk_embedding_input_hashes,omitempty"`
 }
 
 // FlattenChunkSectionIDs returns section_id for each chunk in DFS order.
@@ -192,6 +195,9 @@ func (pf *ParsedFile) EmbeddingsCurrent(expectedModel string, expectedPrefixLimi
 		return false
 	}
 	if len(pf.ChunkEmbeddings) != n {
+		return false
+	}
+	if len(pf.ChunkEmbeddingInputHashes) != n {
 		return false
 	}
 	for i, t := range texts {

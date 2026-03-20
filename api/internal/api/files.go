@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -207,6 +208,7 @@ func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 // @Param       pub_name        formData string false "Publication name"
 // @Param       pub_date        formData string false "Publication date YYYY-MM-DD"
 // @Param       pub_number      formData string false "Publication number"
+// @Param       lazy            formData bool   false "If true: parse lazily (start parsing only when creating a diff). Default=false."
 // @Param       Accept          header   string false "application/json | text/event-stream"
 // @Param       Idempotency-Key header   string false "Idempotency key"
 // @Success     201 {object} fileResponse
@@ -245,6 +247,7 @@ func (s *Server) handleUploadFile(c echo.Context) error {
 // @Param       pub_name        formData string false "Publication name"
 // @Param       pub_date        formData string false "Publication date"
 // @Param       pub_number      formData string false "Publication number"
+// @Param       lazy            formData bool   false "If true: parse lazily (start parsing only when creating a diff). Default=false."
 // @Param       Accept          header   string false "application/json | text/event-stream"
 // @Param       Idempotency-Key header   string false "Idempotency key"
 // @Success     201 {object} fileResponse
@@ -479,18 +482,34 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 		return
 	}
 
+	weightRules, err := s.regexRules.ListWeightRules()
+	if err != nil {
+		s.files.UpdateStatus(f.ID, "failed")
+		publish("failed", map[string]any{"file_id": f.ID, "error": err.Error()})
+		s.dispatcher.Dispatch(webhook.EventFileFailed, toFileResponse(*f))
+		return
+	}
+	omitRules, err := s.regexRules.ListOmitRules()
+	if err != nil {
+		s.files.UpdateStatus(f.ID, "failed")
+		publish("failed", map[string]any{"file_id": f.ID, "error": err.Error()})
+		s.dispatcher.Dispatch(webhook.EventFileFailed, toFileResponse(*f))
+		return
+	}
+
 	embedCfg := embedder.Config{
 		OllamaBaseURL:             s.cfg.OllamaBaseURL,
 		Model:                     s.cfg.EmbedModel,
 		BatchSize:                 s.cfg.EmbedBatchSize,
 		ShortChunkPrefixMaxChars:  s.cfg.EmbedShortChunkPrefixMaxChars,
 		UseWeightPrefix:           s.cfg.EmbedUseWeightPrefix,
+		WeightRules:              weightRules,
+		OmitRules:                omitRules,
 		WeightCritical:            s.cfg.WeightCritical,
 		WeightMain:                s.cfg.WeightMain,
 		WeightStandard:            s.cfg.WeightStandard,
 		WeightTechnical:           s.cfg.WeightTechnical,
 		WeightMaxCap:              s.cfg.WeightMaxCap,
-		EmbeddingContextHash:      s.cfg.EmbeddingContextHash,
 		ProgressInterval:          time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
 		HTTPTimeout:               time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
 	}
@@ -518,6 +537,37 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 	if res.Name != "" {
 		upd.Name = &res.Name
 	}
+
+	// RAG Work-level enrichment (best-effort).
+	if len(res.RagTags) > 0 {
+		if b, err := json.Marshal(res.RagTags); err == nil {
+			s := string(b)
+			upd.RagTags = &s
+		}
+	}
+	if len(res.RagCategories) > 0 {
+		if b, err := json.Marshal(res.RagCategories); err == nil {
+			s := string(b)
+			upd.RagCategories = &s
+		}
+	}
+	if len(res.Keywords) > 0 {
+		// rag_keywords is backed by existing classification.keywords.
+		if b, err := json.Marshal(res.Keywords); err == nil {
+			s := string(b)
+			upd.RagKeywords = &s
+		}
+	}
+	if strings.TrimSpace(res.RagSummary) != "" {
+		upd.RagSummary = &res.RagSummary
+	}
+	if strings.TrimSpace(res.Jurisdiction) != "" {
+		upd.Jurisdiction = &res.Jurisdiction
+	}
+	if strings.TrimSpace(res.ContractType) != "" {
+		upd.ContractType = &res.ContractType
+	}
+
 	_ = s.documents.ApplyUpdate(doc, upd)
 
 	// Write back Expression-level fields to File.
@@ -644,16 +694,40 @@ func (s *Server) uploadFile(c echo.Context, documentID *string) error {
 		return badUpload(err)
 	}
 
+	lazy := req.Lazy
+
 	f, doc, err := s.saveFormFile(c, "file", documentID, req)
 	if err != nil {
 		return err
 	}
 
 	s.dispatcher.Dispatch(webhook.EventFileCreated, toFileResponse(*f))
-	go s.processFile(f, doc)
 
 	if c.Request().Header.Get("Accept") == "text/event-stream" {
-		return sse.Stream(c, s.broker, f.ID)
+		initialData := map[string]any{
+			"file_id": f.ID,
+			"status":  "uploaded",
+		}
+		if lazy {
+			// Lazy upload: only report successful upload and close the stream.
+			return sse.StreamWithInitialEvent(c, s.broker, f.ID,
+				"upload_done", initialData,
+				nil,
+				"upload_done",
+			)
+		}
+
+		// Default upload: stream parsing progress on the same connection.
+		// Start parsing only after SSE subscription + initial event were written.
+		return sse.StreamWithInitialEvent(c, s.broker, f.ID,
+			"upload_done", initialData,
+			func() { go s.processFile(f, doc) },
+		)
+	}
+
+	// Non-SSE: parsing behavior depends on `lazy`.
+	if !lazy {
+		go s.processFile(f, doc)
 	}
 	return c.JSON(http.StatusCreated, toFileResponse(*f))
 }

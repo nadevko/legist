@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/nadevko/legist/internal/parser"
+	"github.com/nadevko/legist/internal/store"
 )
 
 // Config drives legist artifact embedding updates.
@@ -17,15 +19,20 @@ type Config struct {
 	OllamaBaseURL string
 	Model         string
 	BatchSize     int
-	// If >0 and chunk length is below this limit, prefix text as "{section_id}:{content}".
 	ShortChunkPrefixMaxChars int
 	UseWeightPrefix          bool
+	// Weight rules are used for both:
+	// - computing per-chunk weights (and [W*] prefix)
+	// - building per-chunk input hashes for lazy re-embed.
+	WeightRules []store.RegexWeightRule
+	// Omit rules affect Stage3 risk-zone matching only, but they are included
+	// in embedding_context_hash for a consistent "formula of meaning".
+	OmitRules []store.RegexOmitRule
 	WeightCritical           float64
 	WeightMain               float64
 	WeightStandard           float64
 	WeightTechnical          float64
 	WeightMaxCap             float64
-	EmbeddingContextHash     string
 	// Min time between throttled progress callbacks after the first emit (0 = only gate on percent change).
 	ProgressInterval time.Duration
 	HTTPTimeout      time.Duration
@@ -48,30 +55,152 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 		return fmt.Errorf("parse legist json: %w", err)
 	}
 
-	contextHash := cfg.EmbeddingContextHash
-	if contextHash == "" {
-		contextHash = computeEmbeddingContextHash(cfg)
+	// Build stable rule "content" for embedding_context_hash.
+	// Only rule fields that affect behavior are included (regex, enabled, weight).
+	weightHashItems := make([]struct {
+		Regex   string  `json:"regex"`
+		Enabled bool    `json:"enabled"`
+		Weight  float64 `json:"weight"`
+	}, 0, len(cfg.WeightRules))
+	for _, r := range cfg.WeightRules {
+		weightHashItems = append(weightHashItems, struct {
+			Regex   string  `json:"regex"`
+			Enabled bool    `json:"enabled"`
+			Weight  float64 `json:"weight"`
+		}{
+			Regex:   r.Regex,
+			Enabled: r.Enabled,
+			Weight:  r.Weight,
+		})
 	}
-	if pf.EmbeddingsCurrent(cfg.Model, cfg.ShortChunkPrefixMaxChars, contextHash) {
+	weightRulesContentBytes, err := json.Marshal(weightHashItems)
+	if err != nil {
+		return fmt.Errorf("marshal weight rules hash items: %w", err)
+	}
+	weightRulesContent := string(weightRulesContentBytes)
+
+	omitHashItems := make([]struct {
+		Regex   string `json:"regex"`
+		Enabled bool   `json:"enabled"`
+	}, 0, len(cfg.OmitRules))
+	for _, r := range cfg.OmitRules {
+		omitHashItems = append(omitHashItems, struct {
+			Regex   string `json:"regex"`
+			Enabled bool   `json:"enabled"`
+		}{
+			Regex:   r.Regex,
+			Enabled: r.Enabled,
+		})
+	}
+	omitRulesContentBytes, err := json.Marshal(omitHashItems)
+	if err != nil {
+		return fmt.Errorf("marshal omit rules hash items: %w", err)
+	}
+	omitRulesContent := string(omitRulesContentBytes)
+
+	compiledWeightRules := make([]compiledWeightRule, 0, len(cfg.WeightRules))
+	for _, r := range cfg.WeightRules {
+		if !r.Enabled {
+			continue
+		}
+		re, err := regexp.Compile(r.Regex)
+		if err != nil {
+			return fmt.Errorf("compile enabled weight rule regex: %w", err)
+		}
+		compiledWeightRules = append(compiledWeightRules, compiledWeightRule{re: re, weight: r.Weight})
+	}
+
+	omitPatterns := make([]string, 0, len(cfg.OmitRules))
+	for _, r := range cfg.OmitRules {
+		if !r.Enabled {
+			continue
+		}
+		omitPatterns = append(omitPatterns, r.Regex)
+	}
+	compiledOmitRules, err := parser.CompileOmitRules(omitPatterns)
+	if err != nil {
+		return fmt.Errorf("compile enabled omit rule regex: %w", err)
+	}
+
+	currentFormulaHash := computeEmbeddingFormulaHash(cfg, weightRulesContent, omitRulesContent)
+
+	if pf.EmbeddingsCurrent(cfg.Model, cfg.ShortChunkPrefixMaxChars, currentFormulaHash) {
 		return nil
 	}
 
-	texts := make([]string, len(pf.ChunkContent))
-	copy(texts, pf.ChunkContent)
-	if len(texts) == 0 {
+	texts := pf.ChunkContent
+	n := len(texts)
+	if n == 0 {
 		return nil
 	}
-	weights := parser.FlattenChunkWeights(pf.Sections)
-	if len(weights) != len(texts) {
-		return fmt.Errorf("embed: chunk_content and chunk weight length mismatch (%d != %d)", len(texts), len(weights))
+
+	// Ensure embeddings slice exists and has stable size.
+	if len(pf.ChunkEmbeddings) != n {
+		pf.ChunkEmbeddings = make([][]float64, n)
 	}
-	if cfg.UseWeightPrefix {
-		for i := range texts {
-			texts[i] = weightPrefix(weights[i], cfg) + " " + texts[i]
+	if len(pf.ChunkEmbeddingInputHashes) != n {
+		pf.ChunkEmbeddingInputHashes = make([]string, n)
+	}
+
+	weights := make([]float64, n)
+	inputHashes := make([]string, n)
+	inputTexts := make([]string, n) // input string passed to embedder (based on cleaned text) for hash and selective embedding
+
+	for i := 0; i < n; i++ {
+		clean := parser.CleanText(texts[i], compiledOmitRules)
+
+		// Weight classification and embedding input must both use cleaned text.
+		w := classifyWeight(clean, compiledWeightRules, cfg)
+		weights[i] = w
+
+		// If cleaned chunk is empty, embed empty content (no weight prefix),
+		// since stage3 will skip such chunks anyway.
+		var input string
+		switch {
+		case cfg.UseWeightPrefix && clean != "":
+			input = weightPrefix(w, cfg) + " " + clean
+		case cfg.UseWeightPrefix && clean == "":
+			input = ""
+		default:
+			input = clean
+		}
+
+		inputTexts[i] = input
+		sum := sha256.Sum256([]byte(input))
+		inputHashes[i] = hex.EncodeToString(sum[:])
+	}
+
+	// Update chunk weights in the parsed artifact so Stage3 weighted similarity is correct.
+	applyWeightsToSections(&pf.Sections, weights)
+
+	toEmbed := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		// len(nil) is 0, so the nil check is redundant here.
+		needVec := len(pf.ChunkEmbeddings[i]) == 0
+		needHash := pf.ChunkEmbeddingInputHashes[i] != inputHashes[i]
+		if needVec || needHash {
+			toEmbed = append(toEmbed, i)
 		}
 	}
 
-	total := len(texts)
+	pf.EmbeddingModel = cfg.Model
+	pf.EmbeddingShortChunkPrefixMaxChars = cfg.ShortChunkPrefixMaxChars
+	pf.EmbeddingContextHash = currentFormulaHash
+	pf.ChunkEmbeddingInputHashes = inputHashes
+
+	// Nothing to embed, but we still need to persist weight + hash updates.
+	if len(toEmbed) == 0 {
+		onProgress(parser.ParseProgress{
+			Stage:            parser.StageEmbeddingDone,
+			Message:          "embeddings already up-to-date",
+			EmbeddingPercent: 100,
+			ChunksEmbedded:   0,
+			ChunksTotal:      0,
+		})
+		return writeParsedFile(path, &pf)
+	}
+
+	total := len(toEmbed)
 	onProgress(parser.ParseProgress{
 		Stage:       parser.StageEmbeddingStarted,
 		Message:     fmt.Sprintf("embedding %d chunks", total),
@@ -83,7 +212,6 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 		HTTPClient: NewHTTPClient(cfg.HTTPTimeout),
 	}
 
-	out := make([][]float64, 0, total)
 	done := 0
 	var lastEmit time.Time
 	lastSentPercent := -1
@@ -120,31 +248,26 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 		if end > total {
 			end = total
 		}
-		batch := texts[start:end]
-		vecs, err := client.EmbedBatch(ctx, cfg.Model, batch)
+		batchIdx := toEmbed[start:end]
+		batchTexts := make([]string, 0, len(batchIdx))
+		for _, idx := range batchIdx {
+			batchTexts = append(batchTexts, inputTexts[idx])
+		}
+		vecs, err := client.EmbedBatch(ctx, cfg.Model, batchTexts)
 		if err != nil {
 			return fmt.Errorf("embed batch [%d:%d]: %w", start, end, err)
 		}
-		out = append(out, vecs...)
-		done = len(out)
+
+		for j := range vecs {
+			idx := batchIdx[j]
+			pf.ChunkEmbeddings[idx] = vecs[j]
+		}
+		done += len(vecs)
 		emitProgress()
 	}
 
-	if len(out) != total {
-		return fmt.Errorf("embed: expected %d vectors, got %d", total, len(out))
-	}
-
-	pf.ChunkEmbeddings = out
-	pf.EmbeddingModel = cfg.Model
-	pf.EmbeddingShortChunkPrefixMaxChars = cfg.ShortChunkPrefixMaxChars
-	pf.EmbeddingContextHash = contextHash
-
-	serialized, err := json.MarshalIndent(&pf, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal legist json: %w", err)
-	}
-	if err := os.WriteFile(path, serialized, 0644); err != nil {
-		return fmt.Errorf("write legist artifact: %w", err)
+	if err := writeParsedFile(path, &pf); err != nil {
+		return err
 	}
 
 	onProgress(parser.ParseProgress{
@@ -182,9 +305,12 @@ func weightPrefix(w float64, cfg Config) string {
 	}
 }
 
-func computeEmbeddingContextHash(cfg Config) string {
+
+func computeEmbeddingFormulaHash(cfg Config, weightRulesContent, omitRulesContent string) string {
+	// Formula of Meaning: embedding input depends on model, prefix mode and
+	// weight/diff regex rules (even if some of them don't influence the actual vectors).
 	payload := fmt.Sprintf(
-		"model=%s|weight_prefix=%t|short_prefix_max=%d|w_crit=%.6f|w_main=%.6f|w_std=%.6f|w_tech=%.6f|w_cap=%.6f",
+		"model=%s|use_weight_prefix=%t|short_prefix_max=%d|w_crit=%.6f|w_main=%.6f|w_std=%.6f|w_tech=%.6f|w_cap=%.6f|prefix_scheme=v1|weight_rules=%s|omit_rules=%s",
 		cfg.Model,
 		cfg.UseWeightPrefix,
 		cfg.ShortChunkPrefixMaxChars,
@@ -193,7 +319,72 @@ func computeEmbeddingContextHash(cfg Config) string {
 		cfg.WeightStandard,
 		cfg.WeightTechnical,
 		cfg.WeightMaxCap,
+		weightRulesContent,
+		omitRulesContent,
 	)
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
+}
+
+type compiledWeightRule struct {
+	re     *regexp.Regexp
+	weight float64
+}
+
+func classifyWeight(chunkText string, rules []compiledWeightRule, cfg Config) float64 {
+	best := cfg.WeightStandard
+	for _, r := range rules {
+		if !r.re.MatchString(chunkText) {
+			continue
+		}
+		if r.weight > best {
+			best = r.weight
+		}
+	}
+
+	// Apply safety bounds.
+	if cfg.WeightMaxCap > 0 && best > cfg.WeightMaxCap {
+		best = cfg.WeightMaxCap
+	}
+	if best <= 0 {
+		best = cfg.WeightStandard
+	}
+	return best
+}
+
+func applyWeightsToSections(sections *[]parser.Section, weights []float64) {
+	// DFS chunk_content order must match DFS order in parser.Section[].Chunks[].
+	i := 0
+
+	var walk func(sec *parser.Section)
+	walk = func(sec *parser.Section) {
+		if sec == nil {
+			return
+		}
+		for ci := range sec.Chunks {
+			if i >= len(weights) {
+				return
+			}
+			sec.Chunks[ci].Weight = weights[i]
+			i++
+		}
+		for ci := range sec.Children {
+			walk(&sec.Children[ci])
+		}
+	}
+
+	for si := range *sections {
+		walk(&(*sections)[si])
+	}
+}
+
+func writeParsedFile(path string, pf *parser.ParsedFile) error {
+	serialized, err := json.MarshalIndent(pf, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal legist json: %w", err)
+	}
+	if err := os.WriteFile(path, serialized, 0644); err != nil {
+		return fmt.Errorf("write legist artifact: %w", err)
+	}
+	return nil
 }

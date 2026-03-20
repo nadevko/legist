@@ -91,6 +91,13 @@ type LLMMeta struct {
 	PassiveModifications []PassiveModification
 	References           []TLCReference
 	Keywords             []string
+
+	// RAG enrichment (persisted to DB columns for retrieval / filtering).
+	RagTags       []string
+	RagCategories []string
+	RagSummary    string
+	Jurisdiction  string
+	ContractType  string
 }
 
 // Score returns the number of non-empty critical fields.
@@ -241,6 +248,16 @@ func mergeLLMMeta(a, b LLMMeta) LLMMeta {
 	if len(b.PassiveModifications) > len(a.PassiveModifications) {
 		a.PassiveModifications = b.PassiveModifications
 	}
+
+	if len(b.RagTags) > len(a.RagTags) {
+		a.RagTags = b.RagTags
+	}
+	if len(b.RagCategories) > len(a.RagCategories) {
+		a.RagCategories = b.RagCategories
+	}
+	a.RagSummary = pick(a.RagSummary, b.RagSummary)
+	a.Jurisdiction = pick(a.Jurisdiction, b.Jurisdiction)
+	a.ContractType = pick(a.ContractType, b.ContractType)
 	return a
 }
 
@@ -291,6 +308,13 @@ type rawLLMResponse struct {
 		Keywords   []string `json:"keywords"`
 		Dictionary *string  `json:"dictionary"`
 	} `json:"classification"`
+
+	// RAG enrichment (best-effort; may be absent / null).
+	RagTags       []string `json:"rag_tags"`
+	RagCategories []string `json:"rag_categories"`
+	Summary       *string  `json:"summary"`
+	Jurisdiction  *string  `json:"jurisdiction"`
+	ContractType  *string  `json:"contract_type"`
 }
 
 func parseAndValidateMeta(raw string) (LLMMeta, int, error) {
@@ -408,6 +432,35 @@ func parseAndValidateMeta(raw string) (LLMMeta, int, error) {
 				break
 			}
 		}
+	}
+
+	// RAG enrichment (best-effort; not required for AKN correctness).
+	{
+		uniqNormalize := func(in []string, maxItems int, maxLen int) []string {
+			out := make([]string, 0, maxItems)
+			seen := make(map[string]bool, len(in))
+			for _, v := range in {
+				v = strings.TrimSpace(v)
+				if v == "" || len(v) > maxLen {
+					continue
+				}
+				if seen[v] {
+					continue
+				}
+				seen[v] = true
+				out = append(out, v)
+				if len(out) >= maxItems {
+					break
+				}
+			}
+			return out
+		}
+
+		m.RagTags = uniqNormalize(r.RagTags, 16, 64)
+		m.RagCategories = uniqNormalize(r.RagCategories, 8, 64)
+		m.RagSummary = str(r.Summary, 300)
+		m.Jurisdiction = str(r.Jurisdiction, 32)
+		m.ContractType = str(r.ContractType, 128)
 	}
 
 	return m, score, nil

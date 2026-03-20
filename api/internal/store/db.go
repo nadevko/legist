@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS documents (
 	name      TEXT,
 	npa_level INTEGER NOT NULL DEFAULT 8,
 
+	-- RAG (Work-level) enrichment for retrieval/filtering.
+	rag_tags       TEXT,
+	rag_categories TEXT,
+	rag_keywords   TEXT,
+	rag_summary    TEXT,
+	jurisdiction   TEXT,
+	contract_type  TEXT,
+
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS documents_user_id ON documents(user_id);
@@ -143,6 +151,26 @@ CREATE INDEX IF NOT EXISTS diffs_user_id      ON diffs(user_id);
 CREATE INDEX IF NOT EXISTS diffs_document_id  ON diffs(document_id);
 CREATE INDEX IF NOT EXISTS diffs_left_file_id ON diffs(left_file_id);
 CREATE INDEX IF NOT EXISTS diffs_right_file_id ON diffs(right_file_id);
+
+-- Admin-configurable regex rules for embedding weights and Stage3 risk-zone.
+-- All rules are global (not tied to a user) and can be modified at runtime.
+
+CREATE TABLE IF NOT EXISTS regex_weight_rules (
+	id         TEXT PRIMARY KEY,
+	regex      TEXT NOT NULL,
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	weight     REAL NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS regex_weight_rules_enabled ON regex_weight_rules(enabled);
+
+CREATE TABLE IF NOT EXISTS regex_omit_rules (
+	id         TEXT PRIMARY KEY,
+	regex      TEXT NOT NULL,
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS regex_omit_rules_enabled ON regex_omit_rules(enabled);
 `
 
 func Open(path string) (*sqlx.DB, error) {
@@ -171,6 +199,12 @@ func Open(path string) (*sqlx.DB, error) {
 	// и это нормальное поведение.
 	_, _ = db.Exec(`ALTER TABLE files ADD COLUMN document_id TEXT REFERENCES documents(id) ON DELETE SET NULL;`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN rag_tags TEXT;`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN rag_categories TEXT;`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN rag_keywords TEXT;`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN rag_summary TEXT;`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN jurisdiction TEXT;`)
+	_, _ = db.Exec(`ALTER TABLE documents ADD COLUMN contract_type TEXT;`)
 
 	if _, err = db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)

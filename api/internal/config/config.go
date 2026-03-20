@@ -2,8 +2,6 @@ package config
 
 import (
 	_ "embed"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -15,9 +13,14 @@ import (
 //go:embed metadata_prompt_default.txt
 var embeddedMetadataLLMPrompt string
 
+//go:embed qdrant_rag_prompt_prefix_default.txt
+var embeddedQdrantRagPromptPrefix string
+
+//go:embed rag_diff_smart_prompt_default.txt
+var embeddedRagDiffSmartPrompt string
+
 type Config struct {
 	Addr       string
-	DBPath     string
 	DataPath   string
 	JWTSecret  string
 	PublicHost string
@@ -26,6 +29,7 @@ type Config struct {
 
 	QdrantHost     string
 	QdrantGRPCPort string
+	QdrantCollection string
 
 	OllamaBaseURL string
 	EmbedModel    string
@@ -44,16 +48,21 @@ type Config struct {
 	MetadataLLMPrompt     string
 	MetadataHTTPTimeoutMS int // per-request timeout for metadata Ollama calls (METADATA_LLM_HTTP_TIMEOUT_MS)
 
+	// RAG-diff prompts.
+	QdrantRagPromptPrefix string // loaded from QDRANT_RAG_PROMPT_PREFIX_FILE or embedded default
+	RagDiffSmartPrompt    string // loaded from RAG_DIFF_SMART_PROMPT_FILE or embedded default
+
 	// Embedding (Ollama /api/embed) — batch size, SSE throttle, HTTP timeout
 	EmbedBatchSize                int
 	EmbedShortChunkPrefixMaxChars int
 	EmbedUseWeightPrefix          bool
+	WeightRegexFile               string
 	WeightCritical                float64
 	WeightMain                    float64
 	WeightStandard                float64
 	WeightTechnical               float64
 	WeightMaxCap                  float64
-	EmbeddingContextHash          string
+	EmbeddingContextHash          string // deprecated: embedder computes the real formula hash now
 	EmbedProgressIntervalMS       int
 	EmbedHTTPTimeoutMS            int
 
@@ -68,7 +77,6 @@ func Load() *Config {
 	var e struct {
 		Addr       string `env:"ADDR"`
 		Port       string `env:"PORT" envDefault:"8080"`
-		DBPath     string `env:"DB_PATH" envDefault:"legist.db"`
 		DataPath   string `env:"DATA_PATH" envDefault:"../data"`
 		JWTSecret  string `env:"JWT_SECRET" envDefault:"change-me-in-prod"`
 		PublicHost string `env:"PUBLIC_HOST"`
@@ -77,6 +85,7 @@ func Load() *Config {
 
 		QdrantHost     string `env:"QDRANT_HOST" envDefault:"127.0.0.1"`
 		QdrantGRPCPort string `env:"QDRANT_GRPC_PORT" envDefault:"6334"`
+		QdrantCollection string `env:"QDRANT_COLLECTION" envDefault:"legist_rag_chunks"`
 
 		OllamaBaseURL string `env:"OLLAMA_BASE_URL" envDefault:"http://127.0.0.1:11434"`
 		EmbedModel    string `env:"EMBED_MODEL" envDefault:"nomic-embed-text"`
@@ -95,6 +104,7 @@ func Load() *Config {
 		EmbedBatchSize                int     `env:"EMBED_BATCH_SIZE" envDefault:"32"`
 		EmbedShortChunkPrefixMaxChars int     `env:"EMBED_SHORT_CHUNK_PREFIX_MAX_CHARS" envDefault:"200"`
 		EmbedUseWeightPrefix          bool    `env:"EMBED_USE_WEIGHT_PREFIX" envDefault:"true"`
+		WeightRegexFile               string  `env:"WEIGHT_REGEX_FILE"`
 		WeightCritical                float64 `env:"WEIGHT_CRITICAL" envDefault:"3.0"`
 		WeightMain                    float64 `env:"WEIGHT_MAIN" envDefault:"2.0"`
 		WeightStandard                float64 `env:"WEIGHT_STANDARD" envDefault:"1.0"`
@@ -117,7 +127,6 @@ func Load() *Config {
 
 	cfg := &Config{
 		Addr:       addr,
-		DBPath:     e.DBPath,
 		DataPath:   e.DataPath,
 		JWTSecret:  e.JWTSecret,
 		PublicHost: e.PublicHost,
@@ -126,6 +135,7 @@ func Load() *Config {
 
 		QdrantHost:     e.QdrantHost,
 		QdrantGRPCPort: e.QdrantGRPCPort,
+		QdrantCollection: e.QdrantCollection,
 
 		OllamaBaseURL: e.OllamaBaseURL,
 		EmbedModel:    e.EmbedModel,
@@ -144,6 +154,7 @@ func Load() *Config {
 		EmbedBatchSize:                e.EmbedBatchSize,
 		EmbedShortChunkPrefixMaxChars: e.EmbedShortChunkPrefixMaxChars,
 		EmbedUseWeightPrefix:          e.EmbedUseWeightPrefix,
+		WeightRegexFile:               e.WeightRegexFile,
 		WeightCritical:                e.WeightCritical,
 		WeightMain:                    e.WeightMain,
 		WeightStandard:                e.WeightStandard,
@@ -208,25 +219,12 @@ func Load() *Config {
 	if cfg.DiffMatchProgressIntervalMS < 0 {
 		cfg.DiffMatchProgressIntervalMS = 500
 	}
-	cfg.EmbeddingContextHash = buildEmbeddingContextHash(cfg)
+	// Keep for backward compatibility; embedder uses a new formula hash.
+	cfg.EmbeddingContextHash = ""
 	cfg.MetadataLLMPrompt = loadMetadataLLMPrompt(getEnv("METADATA_LLM_PROMPT_FILE", ""))
+	cfg.QdrantRagPromptPrefix = loadPromptText(getEnv("QDRANT_RAG_PROMPT_PREFIX_FILE", ""), embeddedQdrantRagPromptPrefix)
+	cfg.RagDiffSmartPrompt = loadPromptText(getEnv("RAG_DIFF_SMART_PROMPT_FILE", ""), embeddedRagDiffSmartPrompt)
 	return cfg
-}
-
-func buildEmbeddingContextHash(cfg *Config) string {
-	payload := fmt.Sprintf(
-		"model=%s|weight_prefix=%t|short_prefix_max=%d|w_crit=%.6f|w_main=%.6f|w_std=%.6f|w_tech=%.6f|w_cap=%.6f",
-		cfg.EmbedModel,
-		cfg.EmbedUseWeightPrefix,
-		cfg.EmbedShortChunkPrefixMaxChars,
-		cfg.WeightCritical,
-		cfg.WeightMain,
-		cfg.WeightStandard,
-		cfg.WeightTechnical,
-		cfg.WeightMaxCap,
-	)
-	sum := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(sum[:])
 }
 
 func loadMetadataLLMPrompt(file string) string {
@@ -237,6 +235,16 @@ func loadMetadataLLMPrompt(file string) string {
 		}
 	}
 	return embeddedMetadataLLMPrompt
+}
+
+func loadPromptText(file string, embedded string) string {
+	file = strings.TrimSpace(file)
+	if file != "" {
+		if b, err := os.ReadFile(file); err == nil && len(b) > 0 {
+			return string(b)
+		}
+	}
+	return embedded
 }
 
 func getEnv(key, fallback string) string {

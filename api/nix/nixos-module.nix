@@ -11,11 +11,6 @@ in
       default = ":8080";
       description = "Listen address for the API server";
     };
-    dbPath = lib.mkOption {
-      type = lib.types.str;
-      default = "/var/lib/legist/legist.db";
-      description = "Path to SQLite database";
-    };
     dataPath = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/legist/data";
@@ -94,12 +89,13 @@ in
 
         Environment = [
           "ADDR=${cfg.addr}"
-          "DB_PATH=${cfg.dbPath}"
           "DATA_PATH=${cfg.dataPath}"
           "JWT_SECRET=${cfg.jwtSecret}"
           "PUBLIC_HOST=${cfg.publicHost}"
           "BASE_PATH=${cfg.basePath}"
           "ENV=${cfg.env}"
+          "WEIGHT_REGEX_FILE=${cfg.package}/share/legist-api/internal/config/weights-seed.json"
+          "DIFF_MATCH_REGEX_FILE=${cfg.package}/share/legist-api/internal/config/omits-seed.json"
           "QDRANT_HOST=127.0.0.1"
           "QDRANT_GRPC_PORT=6334"
           "OLLAMA_BASE_URL=http://127.0.0.1:11434"

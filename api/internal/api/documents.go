@@ -2,8 +2,10 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -33,6 +35,14 @@ type documentResponse struct {
 	NPALevel int    `json:"npa_level"`
 	Complete bool   `json:"complete"`
 	Created  int64  `json:"created"`
+
+	// RAG Work-level metadata for retrieval / filtering.
+	RagTags       []string `json:"rag_tags"`
+	RagCategories []string `json:"rag_categories"`
+	RagKeywords   []string `json:"rag_keywords"`
+	Summary       string   `json:"summary"`
+	Jurisdiction  string   `json:"jurisdiction"`
+	ContractType  string   `json:"contract_type"`
 }
 
 // handleCreateDocument godoc
@@ -243,6 +253,18 @@ func buildDocument(r documentRequest, userID string) *store.Document {
 }
 
 func toDocumentResponse(d store.Document) documentResponse {
+	parseJSONList := func(raw string) []string {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		var out []string
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return nil
+		}
+		return out
+	}
+
 	return documentResponse{
 		ID:       d.ID,
 		Object:   "document",
@@ -256,5 +278,12 @@ func toDocumentResponse(d store.Document) documentResponse {
 		NPALevel: d.NPALevel,
 		Complete: d.IsComplete(),
 		Created:  toUnix(d.CreatedAt),
+
+		RagTags:       parseJSONList(d.RagTags),
+		RagCategories: parseJSONList(d.RagCategories),
+		RagKeywords:   parseJSONList(d.RagKeywords),
+		Summary:       strings.TrimSpace(d.RagSummary),
+		Jurisdiction:  strings.TrimSpace(d.Jurisdiction),
+		ContractType:  strings.TrimSpace(d.ContractType),
 	}
 }

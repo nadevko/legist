@@ -22,6 +22,14 @@ type DocumentUpdate struct {
 	Country  *string
 	Name     *string
 	NPALevel *int
+
+	// RAG enrichment (Work-level). Nil pointer = do not touch.
+	RagTags       *string
+	RagCategories *string
+	RagKeywords   *string
+	RagSummary    *string
+	Jurisdiction  *string
+	ContractType  *string
 }
 
 func (s *DocumentStore) Create(d *Document) error {
@@ -114,6 +122,24 @@ func (s *DocumentStore) ApplyUpdate(doc *Document, upd DocumentUpdate) error {
 	if upd.NPALevel != nil {
 		doc.NPALevel = *upd.NPALevel
 	}
+	if upd.RagTags != nil {
+		doc.RagTags = *upd.RagTags
+	}
+	if upd.RagCategories != nil {
+		doc.RagCategories = *upd.RagCategories
+	}
+	if upd.RagKeywords != nil {
+		doc.RagKeywords = *upd.RagKeywords
+	}
+	if upd.RagSummary != nil {
+		doc.RagSummary = *upd.RagSummary
+	}
+	if upd.Jurisdiction != nil {
+		doc.Jurisdiction = *upd.Jurisdiction
+	}
+	if upd.ContractType != nil {
+		doc.ContractType = *upd.ContractType
+	}
 	if err := s.persist(doc); err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicate
@@ -132,7 +158,14 @@ func (s *DocumentStore) persist(d *Document) error {
 			date      = :date,
 			country   = :country,
 			name      = :name,
-			npa_level = :npa_level
+			npa_level = :npa_level,
+
+			rag_tags       = :rag_tags,
+			rag_categories = :rag_categories,
+			rag_keywords   = :rag_keywords,
+			rag_summary    = :rag_summary,
+			jurisdiction   = :jurisdiction,
+			contract_type  = :contract_type
 		WHERE id = :id`, d)
 	if err != nil {
 		return fmt.Errorf("persist document: %w", err)

@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	_ "github.com/nadevko/legist/docs"
 	"github.com/nadevko/legist/internal/api"
@@ -13,12 +14,20 @@ import (
 func main() {
 	cfg := config.Load()
 
-	db, err := store.Open(cfg.DBPath)
+	dbPath := filepath.Join(cfg.DataPath, "db.sqlite")
+	db, err := store.Open(dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
 	defer db.Close()
-	log.Printf("database: %s", cfg.DBPath)
+	log.Printf("database: %s", dbPath)
+
+	// Seed global regex rules from template files when tables are empty.
+	// Rules become admin-editable at runtime via CRUD endpoints (added in later steps).
+	if err := store.NewRegexRulesStore(db).
+		SeedFromTemplatesIfEmpty(cfg.WeightRegexFile, cfg.DiffMatchRegexFile); err != nil {
+		log.Fatalf("seed regex rules: %v", err)
+	}
 
 	srv := api.NewServer(cfg, db)
 

@@ -102,11 +102,18 @@ type PipelineResult struct {
 	PubDate       string
 	PubNumber     string
 
-	// Enrichment extracted by LLM (stored in parsed.json only, not DB columns)
+	// Enrichment extracted by LLM (stored in parsed.json only).
 	Lifecycle            []LifecycleEvent
 	PassiveModifications []PassiveModification
 	References           []TLCReference
 	Keywords             []string
+
+	// RAG enrichment (persisted to DB columns for retrieval / filtering).
+	RagTags       []string
+	RagCategories []string
+	RagSummary    string
+	Jurisdiction  string
+	ContractType  string
 
 	// ParsedFilePath is the path to the written application/lessed artifact.
 	ParsedFilePath string
@@ -175,7 +182,7 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 			size = 3000
 		}
 		startW := firstNRunes(raw.PlainText, size)
-		endW := startW
+		endW := lastNRunes(raw.PlainText, size)
 		emit(StageLLMRequested, fmt.Sprintf("extracting AKN metadata (chars=%d)", len(startW)))
 		metaCh = make(chan metaResult, 1)
 		go func() {
@@ -240,6 +247,11 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 		res.PassiveModifications = m.PassiveModifications
 		res.References = m.References
 		res.Keywords = m.Keywords
+		res.RagTags = m.RagTags
+		res.RagCategories = m.RagCategories
+		res.RagSummary = m.RagSummary
+		res.Jurisdiction = m.Jurisdiction
+		res.ContractType = m.ContractType
 	}
 
 	// --- 6. Validate required Work fields ---

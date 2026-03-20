@@ -117,6 +117,17 @@ func (s *FileStore) UpdateStatus(id, status string) error {
 	return nil
 }
 
+// UpdateStatusIf updates status only when the current status matches expectedStatus.
+// Returns true when at least one row was updated.
+func (s *FileStore) UpdateStatusIf(id, expectedStatus, status string) (bool, error) {
+	res, err := s.db.Exec(`UPDATE files SET status = ? WHERE id = ? AND status = ?`, status, id, expectedStatus)
+	if err != nil {
+		return false, fmt.Errorf("update file status if: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // UpdateMeta persists Expression-level fields extracted by LLM.
 // Only non-nil fields are written; existing values are preserved otherwise.
 func (s *FileStore) UpdateMeta(id string, upd FileMetaUpdate) error {
