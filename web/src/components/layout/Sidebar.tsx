@@ -51,8 +51,8 @@ export default function Sidebar({ mobOpen, onClose }: Props) {
           <img src="/stork.png" alt="legist" style={{ width: 22, height: 22, objectFit: 'cover' }} />
         </div>
         <div>
-          <span className="sb-name">legist</span>
-          <span className="sb-tier">Enterprise</span>
+          <span className="sb-name">легист.бел</span>
+          <span className="sb-tier">Легист.бел</span>
         </div>
       </div>
 

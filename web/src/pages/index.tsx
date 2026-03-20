@@ -901,7 +901,7 @@ export function AssistantPage() {
                 <div className="ass-wlc-icon">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.44-4.14" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.44-4.14" /></svg>
                 </div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>legist Ассистент</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Ассистент легист.бел</h2>
                 <p style={{ fontSize: '13.5px', color: 'var(--muted)', maxWidth: 420, lineHeight: 1.6 }}>
                   Задайте вопрос о загруженных актах, попросите объяснить изменение или проверить соответствие законодательству
                 </p>
