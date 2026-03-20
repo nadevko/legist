@@ -41,7 +41,7 @@ type webhookEventResponse struct {
 
 // handleCreateWebhook godoc
 // @Summary     Create webhook endpoint
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Accept      json
 // @Produce     json
@@ -85,7 +85,7 @@ func (s *Server) handleCreateWebhook(c echo.Context) error {
 
 // handleListWebhooks godoc
 // @Summary     List webhook endpoints
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Produce     json
 // @Param       limit          query int    false "Limit"
@@ -108,7 +108,7 @@ func (s *Server) handleListWebhooks(c echo.Context) error {
 
 // handleGetWebhook godoc
 // @Summary     Get webhook endpoint
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Param       id path string true "Webhook endpoint ID"
 // @Produce     json
@@ -127,7 +127,7 @@ func (s *Server) handleGetWebhook(c echo.Context) error {
 
 // handleUpdateWebhook godoc
 // @Summary     Update webhook endpoint (url, events, enabled)
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Param       id              path   string                 true  "Webhook endpoint ID"
 // @Param       body            body   webhookEndpointRequest true  "Fields to update"
@@ -177,7 +177,7 @@ func (s *Server) handleUpdateWebhook(c echo.Context) error {
 
 // handleDeleteWebhook godoc
 // @Summary     Delete webhook endpoint
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Param       id              path   string true  "Webhook endpoint ID"
 // @Param       Idempotency-Key header string false "Idempotency key"
@@ -198,7 +198,7 @@ func (s *Server) handleDeleteWebhook(c echo.Context) error {
 
 // handleListWebhookEvents godoc
 // @Summary     List webhook delivery attempts
-// @Tags        webhooks
+// @Tags        Webhooks
 // @Security    BearerAuth
 // @Param       id             path   string true  "Webhook endpoint ID"
 // @Param       status         query  string false "pending|delivered|failed"

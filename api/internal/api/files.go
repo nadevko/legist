@@ -43,10 +43,10 @@ type filePatchRequest struct {
 
 // handleListFiles godoc
 // @Summary     List files; if document_id is set, forwards to /documents/:id/files
-// @Tags        files
+// @Tags        Files
 // @Security    BearerAuth
 // @Produce     json
-// @Param       owner          query  string   false "omit: own only (user) or own+public (admin); null=public only (admin); or your user id"
+// @Param       owner          query  string   false "omit: own (user) or own+public (admin); null|public=public only (admin); or your user id"
 // @Param       document_id    query  string   false "Forward to /documents/:id/files"
 // @Param       type           query  string   false "pdf|docx"
 // @Param       status         query  string   false "pending|processing|done|failed"
@@ -71,7 +71,7 @@ func (s *Server) handleListFiles(c echo.Context) error {
 
 // handleListDocumentFiles godoc
 // @Summary     List file versions of a document
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Produce     json
 // @Param       id             path   string   true  "Document ID"
@@ -138,7 +138,7 @@ func (s *Server) listFilesCore(c echo.Context, documentID *string) error {
 
 // handleGetFile godoc
 // @Summary     Get file metadata, parsed artifact, download, or stream status
-// @Tags        files
+// @Tags        Files
 // @Security    BearerAuth
 // @Param       id       path   string   true  "File ID"
 // @Param       expand[] query  []string false "Expand: document"
@@ -186,7 +186,7 @@ func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 
 // handleUploadFile godoc
 // @Summary     Upload a file; creates a new Document automatically
-// @Tags        files
+// @Tags        Files
 // @Security    BearerAuth
 // @Accept      multipart/form-data
 // @Produce     json
@@ -230,7 +230,7 @@ func (s *Server) handleUploadFile(c echo.Context) error {
 
 // handleUploadDocumentFile godoc
 // @Summary     Upload a file as a new version of an existing Document
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Accept      multipart/form-data
 // @Produce     json
@@ -264,7 +264,7 @@ func (s *Server) handleUploadDocumentFile(c echo.Context) error {
 
 // handlePatchFile godoc
 // @Summary     Update file Expression-level metadata
-// @Tags        files
+// @Tags        Files
 // @Security    BearerAuth
 // @Accept      json
 // @Produce     json
@@ -309,7 +309,7 @@ func (s *Server) handlePatchFile(c echo.Context) error {
 
 // handleDeleteFile godoc
 // @Summary     Delete file
-// @Tags        files
+// @Tags        Files
 // @Security    BearerAuth
 // @Param       id              path   string true  "File ID"
 // @Param       Idempotency-Key header string false "Idempotency key"

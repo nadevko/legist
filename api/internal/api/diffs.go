@@ -119,7 +119,7 @@ func (s *Server) runDiffComputation(diffID string) {
 
 // handleCreateDiff godoc
 // @Summary     Create a diff (multipart: two file IDs, ID + file, or two files)
-// @Tags        diffs
+// @Tags        Diffs
 // @Security    BearerAuth
 // @Accept      multipart/form-data
 // @Produce     json
@@ -376,7 +376,7 @@ func (s *Server) ensureFileReadable(c echo.Context, f *store.File) error {
 
 // handleListDiffs godoc
 // @Summary     List diffs for the current user
-// @Tags        diffs
+// @Tags        Diffs
 // @Security    BearerAuth
 // @Produce     json
 // @Param       document_id    query  string   false "Filter by document"
@@ -415,7 +415,7 @@ func (s *Server) handleListDiffs(c echo.Context) error {
 
 // handleGetDiff godoc
 // @Summary     Get diff by ID or stream pipeline (SSE)
-// @Tags        diffs
+// @Tags        Diffs
 // @Security    BearerAuth
 // @Param       id       path   string true  "Diff ID"
 // @Param       expand[] query  []string false "Expand: document, left_file, right_file"

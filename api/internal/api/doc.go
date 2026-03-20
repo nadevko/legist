@@ -26,7 +26,7 @@
 // @description     another user's private resource returns 404 (not 403) to avoid leaking existence.
 // @description     Public resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.
 // @description     List `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.
-// @description     `owner=null` (admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
+// @description     `owner=null` or `owner=public` (aliases, admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
 // @description
 // @description     ## Pagination
 // @description     List endpoints support cursor-based pagination via `starting_after` and `ending_before`.
@@ -110,6 +110,30 @@
 // @description     expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 // @description     ok := hmac.Equal([]byte(expected), []byte(signature))
 // @description     ```
+// @tag.name        Sessions
+// @tag.description Registration, login, access-token refresh, logout, listing active sessions, and password-reset token flows.
+//
+// @tag.name        Users
+// @tag.description User profiles: read and update your email, delete your account. Admins may read any user and assign `role` via PATCH.
+//
+// @tag.name        Documents
+// @tag.description AKN Work-level documents: create, list, get, patch, delete; add and list file versions under `/documents/:id/files`.
+//
+// @tag.name        Files
+// @tag.description File versions at `/files`: upload, list, get (JSON, legistoso, binary, SSE), patch expression-level metadata, delete.
+//
+// @tag.name        Diffs
+// @tag.description Compare two versions of the same document: multipart job creation, list, get, and SSE for async progress.
+//
+// @tag.name        Webhooks
+// @tag.description Register webhook endpoints, choose events, inspect signed delivery history, enable or disable endpoints.
+//
+// @tag.name        Chat
+// @tag.description RAG-based Q&A over legal corpora (stub).
+//
+// @tag.name        System
+// @tag.description Liveness and routing helpers (e.g. health).
+//
 // @host            legist.nadevko.cc
 // @BasePath        /
 // @securityDefinitions.apikey BearerAuth

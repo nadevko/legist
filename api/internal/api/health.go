@@ -8,7 +8,7 @@ import (
 
 // handleHealth godoc
 // @Summary     Health check
-// @Tags        system
+// @Tags        System
 // @Produce     json
 // @Success     200 {object} map[string]string
 // @Router      /health [get]

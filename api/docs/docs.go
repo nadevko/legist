@@ -30,7 +30,7 @@ const docTemplate = `{
                     "text/event-stream"
                 ],
                 "tags": [
-                    "chat"
+                    "Chat"
                 ],
                 "summary": "Ask a question about laws (RAG-based Q\u0026A)",
                 "parameters": [
@@ -83,7 +83,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "diffs"
+                    "Diffs"
                 ],
                 "summary": "List diffs for the current user",
                 "parameters": [
@@ -162,7 +162,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "diffs"
+                    "Diffs"
                 ],
                 "summary": "Create a diff (multipart: two file IDs, ID + file, or two files)",
                 "parameters": [
@@ -279,7 +279,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "diffs"
+                    "Diffs"
                 ],
                 "summary": "Get diff by ID or stream pipeline (SSE)",
                 "parameters": [
@@ -334,13 +334,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "List documents",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "omit: own only (user) or own+public (admin); null=public only (admin); or your user id",
+                        "description": "omit: own (user) or own+public (admin); null|public=public only (admin); or your user id",
                         "name": "owner",
                         "in": "query"
                     },
@@ -391,7 +391,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "Create a document",
                 "parameters": [
@@ -444,7 +444,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "Get document",
                 "parameters": [
@@ -494,7 +494,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "Delete document",
                 "parameters": [
@@ -546,7 +546,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "Update document Work-level fields",
                 "parameters": [
@@ -612,7 +612,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "List file versions of a document",
                 "parameters": [
@@ -682,7 +682,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "documents"
+                    "Documents"
                 ],
                 "summary": "Upload a file as a new version of an existing Document",
                 "parameters": [
@@ -788,13 +788,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "files"
+                    "Files"
                 ],
                 "summary": "List files; if document_id is set, forwards to /documents/:id/files",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "omit: own only (user) or own+public (admin); null=public only (admin); or your user id",
+                        "description": "omit: own (user) or own+public (admin); null|public=public only (admin); or your user id",
                         "name": "owner",
                         "in": "query"
                     },
@@ -873,7 +873,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "files"
+                    "Files"
                 ],
                 "summary": "Upload a file; creates a new Document automatically",
                 "parameters": [
@@ -1014,7 +1014,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "files"
+                    "Files"
                 ],
                 "summary": "Get file metadata, parsed artifact, download, or stream status",
                 "parameters": [
@@ -1070,7 +1070,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "files"
+                    "Files"
                 ],
                 "summary": "Delete file",
                 "parameters": [
@@ -1122,7 +1122,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "files"
+                    "Files"
                 ],
                 "summary": "Update file Expression-level metadata",
                 "parameters": [
@@ -1177,7 +1177,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "system"
+                    "System"
                 ],
                 "summary": "Health check",
                 "responses": {
@@ -1204,7 +1204,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "List active sessions",
                 "parameters": [
@@ -1250,7 +1250,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Login",
                 "parameters": [
@@ -1294,7 +1294,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Logout (delete session)",
                 "parameters": [
@@ -1344,7 +1344,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Request password reset token",
                 "parameters": [
@@ -1387,7 +1387,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Change password using reset token",
                 "parameters": [
@@ -1432,7 +1432,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Refresh access token",
                 "parameters": [
@@ -1477,7 +1477,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "Sessions"
                 ],
                 "summary": "Register a new user",
                 "parameters": [
@@ -1530,7 +1530,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "Users"
                 ],
                 "summary": "Get user",
                 "parameters": [
@@ -1570,7 +1570,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "users"
+                    "Users"
                 ],
                 "summary": "Delete user",
                 "parameters": [
@@ -1622,7 +1622,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "Users"
                 ],
                 "summary": "Update user (email for self; role for admins)",
                 "parameters": [
@@ -1694,7 +1694,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "List webhook endpoints",
                 "parameters": [
@@ -1739,7 +1739,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "Create webhook endpoint",
                 "parameters": [
@@ -1792,7 +1792,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "Get webhook endpoint",
                 "parameters": [
@@ -1826,7 +1826,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "Delete webhook endpoint",
                 "parameters": [
@@ -1872,7 +1872,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "Update webhook endpoint (url, events, enabled)",
                 "parameters": [
@@ -1932,7 +1932,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "webhooks"
+                    "Webhooks"
                 ],
                 "summary": "List webhook delivery attempts",
                 "parameters": [
@@ -2588,7 +2588,41 @@ const docTemplate = `{
             "name": "Authorization",
             "in": "header"
         }
-    }
+    },
+    "tags": [
+        {
+            "description": "Registration, login, access-token refresh, logout, listing active sessions, and password-reset token flows.",
+            "name": "Sessions"
+        },
+        {
+            "description": "User profiles: read and update your email, delete your account. Admins may read any user and assign ` + "`" + `role` + "`" + ` via PATCH.",
+            "name": "Users"
+        },
+        {
+            "description": "AKN Work-level documents: create, list, get, patch, delete; add and list file versions under ` + "`" + `/documents/:id/files` + "`" + `.",
+            "name": "Documents"
+        },
+        {
+            "description": "File versions at ` + "`" + `/files` + "`" + `: upload, list, get (JSON, legistoso, binary, SSE), patch expression-level metadata, delete.",
+            "name": "Files"
+        },
+        {
+            "description": "Compare two versions of the same document: multipart job creation, list, get, and SSE for async progress.",
+            "name": "Diffs"
+        },
+        {
+            "description": "Register webhook endpoints, choose events, inspect signed delivery history, enable or disable endpoints.",
+            "name": "Webhooks"
+        },
+        {
+            "description": "RAG-based Q\u0026A over legal corpora (stub).",
+            "name": "Chat"
+        },
+        {
+            "description": "Liveness and routing helpers (e.g. health).",
+            "name": "System"
+        }
+    ]
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
@@ -2598,7 +2632,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Legist API",
-	Description:      "AI assistant for comparing revisions of normative legal acts (НПА) of the Republic of Belarus.\n\n## Authentication\nAll endpoints except public auth routes require a Bearer token in the `Authorization` header.\nObtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.\n\n## Request IDs\nEvery response includes a `Request-Id` header for debugging.\n\n## Idempotency\n`POST` requests require an `Idempotency-Key` header.\nRepeating a request with the same key returns the cached response.\nKeys expire after 24 hours. Reusing a key for a different endpoint returns 422.\n\n## Roles\nUsers have `role`: `user` or `admin` (in `users` table and JWT `role` claim).\nOnly `admin` may change another user's role via `PATCH /users/:id`.\nIn dev (`ENV=dev`), new registrations default to `admin`; otherwise default is `user`.\n\n## Ownership and access control\nResources belong to the authenticated user. Attempting to read or mutate\nanother user's private resource returns 404 (not 403) to avoid leaking existence.\nPublic resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.\nList `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.\n`owner=null` (admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.\n\n## Pagination\nList endpoints support cursor-based pagination via `starting_after` and `ending_before`.\nDefault limit is 20, max 100. Response includes `has_more: true` if more items exist.\n\n## Expanding objects\nPass `expand[]=document` (or other resource name) to expand related objects inline.\n\n## Content negotiation\nUse the `Accept` header to control response format:\n- `application/json` — JSON metadata (default)\n- `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)\nwith `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)\n- `text/event-stream` — SSE stream (async progress or sync upload)\n- `application/pdf`, `application/vnd...docx` — file download\n\n## Documents and files\nA **Document** is the AKN Work-level entity — it identifies one НПА across all its versions.\nA **File** is one physical version (редакция) of a Document.\nUploading via `POST /files` creates a new Document automatically.\nUploading via `POST /documents/:id/files` adds a version to an existing Document.\n`GET /files?document_id=:id` is an alias for `GET /documents/:id/files`.\n`POST /files` with `document_id` form field is an alias for `POST /documents/:id/files`.\n\n## File processing pipeline\nFiles are parsed asynchronously after upload. Track progress via:\n1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`\n2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`\n3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)\n4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events\n\n## Diffs\n`POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**\n(existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**\n(upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).\nUse `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.\n\n### SSE progress stages\n| Stage | Description |\n|-------|-------------|\n| `parsing_started` | Document structure parsing in progress |\n| `llm_requested` | Metadata extraction starts as soon as first N chars are available |\n| `llm_skipped` | All metadata was provided explicitly, LLM not needed |\n| `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |\n| `saving` | Writing plain and legistoso artifacts to disk |\n| `done` | Processing complete |\n| `failed` | Processing failed; `error` and `missing_fields` present |\n\n## AKN metadata\nMetadata follows Akoma Ntoso conventions. Work-level fields (`subtype`, `number`,\n`author`, `date`) are stored on the Document and are required for diff.\nExpression-level fields (`version_date`, `version_label`, `language`, `pub_*`)\nare stored on the File and are optional. If not supplied explicitly, the LLM\nattempts to extract them from the document text. After upload, expression-level\nfields can be corrected via `PATCH /files/:id`.\n\n## Webhooks\nRegister endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.\nVerify the `Legist-Signature: sha256=...` header using your endpoint secret.\nFailed deliveries are retried up to 3 times with exponential backoff (1s, 4s).\nInspect delivery history via `GET /webhooks/:id/events`.\nEnable or disable an endpoint via `PATCH /webhooks/:id` with `{\"enabled\": false}`.\n\n### Supported webhook events\n| Event | Description |\n|-------|-------------|\n| `file.created` | File uploaded |\n| `file.parsed` | Parsing and metadata extraction succeeded |\n| `file.failed` | Parsing or metadata extraction failed |\n| `file.deleted` | File deleted |\n| `diff.created` | Diff job started |\n| `diff.done` | Diff completed |\n| `diff.failed` | Diff failed |\n| `user.created` | User registered |\n| `user.deleted` | User deleted |\n\n### Signature verification (Go example)\n```go\nmac := hmac.New(sha256.New, []byte(secret))\nmac.Write(body)\nexpected := \"sha256=\" + hex.EncodeToString(mac.Sum(nil))\nok := hmac.Equal([]byte(expected), []byte(signature))\n```",
+	Description:      "AI assistant for comparing revisions of normative legal acts (НПА) of the Republic of Belarus.\n\n## Authentication\nAll endpoints except public auth routes require a Bearer token in the `Authorization` header.\nObtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.\n\n## Request IDs\nEvery response includes a `Request-Id` header for debugging.\n\n## Idempotency\n`POST` requests require an `Idempotency-Key` header.\nRepeating a request with the same key returns the cached response.\nKeys expire after 24 hours. Reusing a key for a different endpoint returns 422.\n\n## Roles\nUsers have `role`: `user` or `admin` (in `users` table and JWT `role` claim).\nOnly `admin` may change another user's role via `PATCH /users/:id`.\nIn dev (`ENV=dev`), new registrations default to `admin`; otherwise default is `user`.\n\n## Ownership and access control\nResources belong to the authenticated user. Attempting to read or mutate\nanother user's private resource returns 404 (not 403) to avoid leaking existence.\nPublic resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.\nList `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.\n`owner=null` or `owner=public` (aliases, admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.\n\n## Pagination\nList endpoints support cursor-based pagination via `starting_after` and `ending_before`.\nDefault limit is 20, max 100. Response includes `has_more: true` if more items exist.\n\n## Expanding objects\nPass `expand[]=document` (or other resource name) to expand related objects inline.\n\n## Content negotiation\nUse the `Accept` header to control response format:\n- `application/json` — JSON metadata (default)\n- `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)\nwith `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)\n- `text/event-stream` — SSE stream (async progress or sync upload)\n- `application/pdf`, `application/vnd...docx` — file download\n\n## Documents and files\nA **Document** is the AKN Work-level entity — it identifies one НПА across all its versions.\nA **File** is one physical version (редакция) of a Document.\nUploading via `POST /files` creates a new Document automatically.\nUploading via `POST /documents/:id/files` adds a version to an existing Document.\n`GET /files?document_id=:id` is an alias for `GET /documents/:id/files`.\n`POST /files` with `document_id` form field is an alias for `POST /documents/:id/files`.\n\n## File processing pipeline\nFiles are parsed asynchronously after upload. Track progress via:\n1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`\n2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`\n3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)\n4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events\n\n## Diffs\n`POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**\n(existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**\n(upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).\nUse `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.\n\n### SSE progress stages\n| Stage | Description |\n|-------|-------------|\n| `parsing_started` | Document structure parsing in progress |\n| `llm_requested` | Metadata extraction starts as soon as first N chars are available |\n| `llm_skipped` | All metadata was provided explicitly, LLM not needed |\n| `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |\n| `saving` | Writing plain and legistoso artifacts to disk |\n| `done` | Processing complete |\n| `failed` | Processing failed; `error` and `missing_fields` present |\n\n## AKN metadata\nMetadata follows Akoma Ntoso conventions. Work-level fields (`subtype`, `number`,\n`author`, `date`) are stored on the Document and are required for diff.\nExpression-level fields (`version_date`, `version_label`, `language`, `pub_*`)\nare stored on the File and are optional. If not supplied explicitly, the LLM\nattempts to extract them from the document text. After upload, expression-level\nfields can be corrected via `PATCH /files/:id`.\n\n## Webhooks\nRegister endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.\nVerify the `Legist-Signature: sha256=...` header using your endpoint secret.\nFailed deliveries are retried up to 3 times with exponential backoff (1s, 4s).\nInspect delivery history via `GET /webhooks/:id/events`.\nEnable or disable an endpoint via `PATCH /webhooks/:id` with `{\"enabled\": false}`.\n\n### Supported webhook events\n| Event | Description |\n|-------|-------------|\n| `file.created` | File uploaded |\n| `file.parsed` | Parsing and metadata extraction succeeded |\n| `file.failed` | Parsing or metadata extraction failed |\n| `file.deleted` | File deleted |\n| `diff.created` | Diff job started |\n| `diff.done` | Diff completed |\n| `diff.failed` | Diff failed |\n| `user.created` | User registered |\n| `user.deleted` | User deleted |\n\n### Signature verification (Go example)\n```go\nmac := hmac.New(sha256.New, []byte(secret))\nmac.Write(body)\nexpected := \"sha256=\" + hex.EncodeToString(mac.Sum(nil))\nok := hmac.Equal([]byte(expected), []byte(signature))\n```",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -39,7 +39,7 @@ type updateUserRequest struct {
 
 // handleRegister godoc
 // @Summary     Register a new user
-// @Tags        auth
+// @Tags        Sessions
 // @Accept      json
 // @Produce     json
 // @Param       body            body   registerRequest true  "Email and password"
@@ -82,7 +82,7 @@ func (s *Server) handleRegister(c echo.Context) error {
 
 // handleLogin godoc
 // @Summary     Login
-// @Tags        auth
+// @Tags        Sessions
 // @Accept      json
 // @Produce     json
 // @Param       body body loginRequest true "Email and password"
@@ -130,7 +130,7 @@ func (s *Server) handleLogin(c echo.Context) error {
 
 // handleRefresh godoc
 // @Summary     Refresh access token
-// @Tags        auth
+// @Tags        Sessions
 // @Accept      json
 // @Produce     json
 // @Param       body body refreshRequest true "Refresh token"
@@ -173,7 +173,7 @@ func (s *Server) handleRefresh(c echo.Context) error {
 
 // handleLogout godoc
 // @Summary     Logout (delete session)
-// @Tags        auth
+// @Tags        Sessions
 // @Security    BearerAuth
 // @Param       id              path   string true  "Session ID"
 // @Param       Idempotency-Key header string false "Idempotency key"
@@ -196,7 +196,7 @@ func (s *Server) handleLogout(c echo.Context) error {
 
 // handleListSessions godoc
 // @Summary     List active sessions
-// @Tags        auth
+// @Tags        Sessions
 // @Security    BearerAuth
 // @Produce     json
 // @Param       limit          query int    false "Limit"
@@ -220,7 +220,7 @@ func (s *Server) handleListSessions(c echo.Context) error {
 
 // handleGetUser godoc
 // @Summary     Get user
-// @Tags        users
+// @Tags        Users
 // @Security    BearerAuth
 // @Param       id path string true "User ID or 'me'"
 // @Produce     json
@@ -245,7 +245,7 @@ func (s *Server) handleGetUser(c echo.Context) error {
 
 // handleUpdateUser godoc
 // @Summary     Update user (email for self; role for admins)
-// @Tags        users
+// @Tags        Users
 // @Security    BearerAuth
 // @Param       id              path   string            true  "User ID or 'me'"
 // @Param       body            body   updateUserRequest true  "Fields to update (email and/or role)"
@@ -333,7 +333,7 @@ func (s *Server) handleUpdateUser(c echo.Context) error {
 
 // handleDeleteUser godoc
 // @Summary     Delete user
-// @Tags        users
+// @Tags        Users
 // @Security    BearerAuth
 // @Param       id              path   string true  "User ID or 'me'"
 // @Param       Idempotency-Key header string false "Idempotency key"

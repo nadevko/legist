@@ -25,7 +25,7 @@ type chatSource struct {
 
 // handleChat godoc
 // @Summary     Ask a question about laws (RAG-based Q&A)
-// @Tags        chat
+// @Tags        Chat
 // @Security    BearerAuth
 // @Accept      json
 // @Produce     json

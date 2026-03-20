@@ -33,7 +33,7 @@ type changePasswordRequest struct {
 //	to prevent user enumeration. The token is only usable if the
 //	email is registered.
 //
-// @Tags        auth
+// @Tags        Sessions
 // @Accept      json
 // @Produce     json
 // @Param       body            body   passwordResetRequest true  "Email"
@@ -81,7 +81,7 @@ func (s *Server) handleRequestPasswordReset(c echo.Context) error {
 
 // handleChangePassword godoc
 // @Summary     Change password using reset token
-// @Tags        auth
+// @Tags        Sessions
 // @Accept      json
 // @Produce     json
 // @Param       body body changePasswordRequest true "Reset token and new password"

@@ -430,7 +430,7 @@ info:
     another user's private resource returns 404 (not 403) to avoid leaking existence.
     Public resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.
     List `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.
-    `owner=null` (admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
+    `owner=null` or `owner=public` (aliases, admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
 
     ## Pagination
     List endpoints support cursor-based pagination via `starting_after` and `ending_before`.
@@ -552,7 +552,7 @@ paths:
       - BearerAuth: []
       summary: Ask a question about laws (RAG-based Q&A)
       tags:
-      - chat
+      - Chat
   /diffs:
     get:
       parameters:
@@ -602,7 +602,7 @@ paths:
       - BearerAuth: []
       summary: List diffs for the current user
       tags:
-      - diffs
+      - Diffs
     post:
       consumes:
       - multipart/form-data
@@ -679,7 +679,7 @@ paths:
       - BearerAuth: []
       summary: 'Create a diff (multipart: two file IDs, ID + file, or two files)'
       tags:
-      - diffs
+      - Diffs
   /diffs/{id}:
     get:
       parameters:
@@ -714,11 +714,11 @@ paths:
       - BearerAuth: []
       summary: Get diff by ID or stream pipeline (SSE)
       tags:
-      - diffs
+      - Diffs
   /documents:
     get:
       parameters:
-      - description: 'omit: own only (user) or own+public (admin); null=public only
+      - description: 'omit: own (user) or own+public (admin); null|public=public only
           (admin); or your user id'
         in: query
         name: owner
@@ -750,7 +750,7 @@ paths:
       - BearerAuth: []
       summary: List documents
       tags:
-      - documents
+      - Documents
     post:
       consumes:
       - application/json
@@ -784,7 +784,7 @@ paths:
       - BearerAuth: []
       summary: Create a document
       tags:
-      - documents
+      - Documents
   /documents/{id}:
     delete:
       parameters:
@@ -814,7 +814,7 @@ paths:
       - BearerAuth: []
       summary: Delete document
       tags:
-      - documents
+      - Documents
     get:
       parameters:
       - description: Document ID
@@ -848,7 +848,7 @@ paths:
       - BearerAuth: []
       summary: Get document
       tags:
-      - documents
+      - Documents
     patch:
       consumes:
       - application/json
@@ -891,7 +891,7 @@ paths:
       - BearerAuth: []
       summary: Update document Work-level fields
       tags:
-      - documents
+      - Documents
   /documents/{id}/files:
     get:
       parameters:
@@ -935,7 +935,7 @@ paths:
       - BearerAuth: []
       summary: List file versions of a document
       tags:
-      - documents
+      - Documents
     post:
       consumes:
       - multipart/form-data
@@ -1005,11 +1005,11 @@ paths:
       - BearerAuth: []
       summary: Upload a file as a new version of an existing Document
       tags:
-      - documents
+      - Documents
   /files:
     get:
       parameters:
-      - description: 'omit: own only (user) or own+public (admin); null=public only
+      - description: 'omit: own (user) or own+public (admin); null|public=public only
           (admin); or your user id'
         in: query
         name: owner
@@ -1060,7 +1060,7 @@ paths:
       - BearerAuth: []
       summary: List files; if document_id is set, forwards to /documents/:id/files
       tags:
-      - files
+      - Files
     post:
       consumes:
       - multipart/form-data
@@ -1153,7 +1153,7 @@ paths:
       - BearerAuth: []
       summary: Upload a file; creates a new Document automatically
       tags:
-      - files
+      - Files
   /files/{id}:
     delete:
       parameters:
@@ -1183,7 +1183,7 @@ paths:
       - BearerAuth: []
       summary: Delete file
       tags:
-      - files
+      - Files
     get:
       parameters:
       - description: File ID
@@ -1222,7 +1222,7 @@ paths:
       - BearerAuth: []
       summary: Get file metadata, parsed artifact, download, or stream status
       tags:
-      - files
+      - Files
     patch:
       consumes:
       - application/json
@@ -1261,7 +1261,7 @@ paths:
       - BearerAuth: []
       summary: Update file Expression-level metadata
       tags:
-      - files
+      - Files
   /health:
     get:
       produces:
@@ -1275,7 +1275,7 @@ paths:
             type: object
       summary: Health check
       tags:
-      - system
+      - System
   /sessions:
     get:
       parameters:
@@ -1306,7 +1306,7 @@ paths:
       - BearerAuth: []
       summary: List active sessions
       tags:
-      - auth
+      - Sessions
     post:
       consumes:
       - application/json
@@ -1334,7 +1334,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       summary: Login
       tags:
-      - auth
+      - Sessions
   /sessions/{id}:
     delete:
       parameters:
@@ -1364,7 +1364,7 @@ paths:
       - BearerAuth: []
       summary: Logout (delete session)
       tags:
-      - auth
+      - Sessions
   /tokens/password-reset:
     patch:
       consumes:
@@ -1393,7 +1393,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       summary: Change password using reset token
       tags:
-      - auth
+      - Sessions
     post:
       consumes:
       - application/json
@@ -1422,7 +1422,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       summary: Request password reset token
       tags:
-      - auth
+      - Sessions
   /tokens/refresh:
     post:
       consumes:
@@ -1451,7 +1451,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       summary: Refresh access token
       tags:
-      - auth
+      - Sessions
   /users:
     post:
       consumes:
@@ -1484,7 +1484,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       summary: Register a new user
       tags:
-      - auth
+      - Sessions
   /users/{id}:
     delete:
       parameters:
@@ -1514,7 +1514,7 @@ paths:
       - BearerAuth: []
       summary: Delete user
       tags:
-      - users
+      - Users
     get:
       parameters:
       - description: User ID or 'me'
@@ -1541,7 +1541,7 @@ paths:
       - BearerAuth: []
       summary: Get user
       tags:
-      - users
+      - Users
     patch:
       consumes:
       - application/json
@@ -1588,7 +1588,7 @@ paths:
       - BearerAuth: []
       summary: Update user (email for self; role for admins)
       tags:
-      - users
+      - Users
   /webhooks:
     get:
       parameters:
@@ -1615,7 +1615,7 @@ paths:
       - BearerAuth: []
       summary: List webhook endpoints
       tags:
-      - webhooks
+      - Webhooks
     post:
       consumes:
       - application/json
@@ -1649,7 +1649,7 @@ paths:
       - BearerAuth: []
       summary: Create webhook endpoint
       tags:
-      - webhooks
+      - Webhooks
   /webhooks/{id}:
     delete:
       parameters:
@@ -1675,7 +1675,7 @@ paths:
       - BearerAuth: []
       summary: Delete webhook endpoint
       tags:
-      - webhooks
+      - Webhooks
     get:
       parameters:
       - description: Webhook endpoint ID
@@ -1698,7 +1698,7 @@ paths:
       - BearerAuth: []
       summary: Get webhook endpoint
       tags:
-      - webhooks
+      - Webhooks
     patch:
       consumes:
       - application/json
@@ -1737,7 +1737,7 @@ paths:
       - BearerAuth: []
       summary: Update webhook endpoint (url, events, enabled)
       tags:
-      - webhooks
+      - Webhooks
   /webhooks/{id}/events:
     get:
       parameters:
@@ -1773,7 +1773,7 @@ paths:
       - BearerAuth: []
       summary: List webhook delivery attempts
       tags:
-      - webhooks
+      - Webhooks
 securityDefinitions:
   BearerAuth:
     description: 'Enter token in format: Bearer {token}'
@@ -1781,3 +1781,26 @@ securityDefinitions:
     name: Authorization
     type: apiKey
 swagger: "2.0"
+tags:
+- description: Registration, login, access-token refresh, logout, listing active sessions,
+    and password-reset token flows.
+  name: Sessions
+- description: 'User profiles: read and update your email, delete your account. Admins
+    may read any user and assign `role` via PATCH.'
+  name: Users
+- description: 'AKN Work-level documents: create, list, get, patch, delete; add and
+    list file versions under `/documents/:id/files`.'
+  name: Documents
+- description: 'File versions at `/files`: upload, list, get (JSON, legistoso, binary,
+    SSE), patch expression-level metadata, delete.'
+  name: Files
+- description: 'Compare two versions of the same document: multipart job creation,
+    list, get, and SSE for async progress.'
+  name: Diffs
+- description: Register webhook endpoints, choose events, inspect signed delivery
+    history, enable or disable endpoints.
+  name: Webhooks
+- description: RAG-based Q&A over legal corpora (stub).
+  name: Chat
+- description: Liveness and routing helpers (e.g. health).
+  name: System

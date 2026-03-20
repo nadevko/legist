@@ -37,7 +37,7 @@ type documentResponse struct {
 
 // handleCreateDocument godoc
 // @Summary     Create a document
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Accept      json
 // @Produce     json
@@ -66,10 +66,10 @@ func (s *Server) handleCreateDocument(c echo.Context) error {
 
 // handleListDocuments godoc
 // @Summary     List documents
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Produce     json
-// @Param       owner          query string false "omit: own only (user) or own+public (admin); null=public only (admin); or your user id"
+// @Param       owner          query string false "omit: own (user) or own+public (admin); null|public=public only (admin); or your user id"
 // @Param       limit          query int    false "Limit"
 // @Param       starting_after query string false "Cursor"
 // @Param       ending_before  query string false "Cursor"
@@ -105,7 +105,7 @@ func (s *Server) handleListDocuments(c echo.Context) error {
 
 // handleGetDocument godoc
 // @Summary     Get document
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Param       id       path   string   true  "Document ID"
 // @Param       expand[] query  []string false "Expand: files"
@@ -124,7 +124,7 @@ func (s *Server) handleGetDocument(c echo.Context) error {
 
 // handleUpdateDocument godoc
 // @Summary     Update document Work-level fields
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Param       id              path   string          true  "Document ID"
 // @Param       body            body   documentRequest true  "Fields to update"
@@ -179,7 +179,7 @@ func (s *Server) handleUpdateDocument(c echo.Context) error {
 
 // handleDeleteDocument godoc
 // @Summary     Delete document
-// @Tags        documents
+// @Tags        Documents
 // @Security    BearerAuth
 // @Param       id              path   string true  "Document ID"
 // @Param       Idempotency-Key header string false "Idempotency key"

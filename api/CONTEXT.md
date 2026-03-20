@@ -92,6 +92,7 @@ legist/
 
 ### Swagger
 - Version locked at `v1-alpha` — never bump
+- Tags are semantic (not URL-prefix): **Sessions** (register, login, refresh, logout, sessions list, password reset), **Users**, **Documents**, **Files**, **Diffs**, **Webhooks**, **Chat**, **System** — each tag has a description in `doc.go`
 - Single definition, no dropdown selector
 - Generated via flake app `swagen` at **repository root** (parent of `api/`): `nix run .#swagen` from the repo root, or `nix run ..#swagen` from `api/`. Runs `swag init -g doc.go -d ./internal/api -o docs` inside `api/`, then renames `docs/swagger.json` → `docs/v1-alpha.json`.
 - Served at `/swagger/v1-alpha.json` as static file
@@ -190,7 +191,7 @@ If metadata fields are not supplied at upload time, `qwen2.5:3b` attempts extrac
 ### Ownership and Security
 - Resources return 404 (not 403) when they exist but belong to another user
 - Public documents (`user_id IS NULL`) are readable by all authenticated users but not mutable
-- List `owner` on `GET /files` and `GET /documents`: omit → user sees only own; admin sees own + public (`user_id IS NULL`). `owner=null` (admin only) → public only. `owner=<your id>` → own only. Any other user id → `400`.
+- List `owner` on `GET /files` and `GET /documents`: omit → user sees only own; admin sees own + public (`user_id IS NULL`). `owner=null` or `owner=public` (aliases, case-insensitive, admin only) → public only. `owner=<your id>` → own only. Any other user id → `400`.
 - `DELETE /sessions/:id` uses `WHERE id=? AND user_id=?` — 0 rows = 404
 - `POST /tokens/password-reset` always returns 200 regardless of email existence (anti-enumeration)
 - `POST /users` returns 409 only on UNIQUE violation, other errors return 500
