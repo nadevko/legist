@@ -45,18 +45,22 @@ legist/
 │       │   ├── middleware.go     # Middleware(secret), UserID(c), AuthError, Version
 │       │   └── password.go       # HashPassword, CheckPassword
 │       ├── config/               # env-based config
-│       │   └── config.go         # Config struct, Load()
+│       │   ├── config.go         # Config struct, Load()
+│       │   └── metadata_prompt_default.txt  # bundled metadata LLM instructions (override via METADATA_LLM_PROMPT_FILE)
 │       ├── pagination/           # cursor-based pagination
 │       │   └── pagination.go     # Params, Page, Response, NewResponse
 │       ├── parser/               # document parsing and metadata extraction
 │       │   ├── types.go          # ParsedFile, ParsedMeta, Section, AKN types
 │       │   ├── parser.go         # Parser interface, New(mime), ParseFile(path, mime)
-│       │   ├── pipeline.go       # Run() — full parse+LLM+write pipeline with SSE progress
-│       │   ├── meta.go           # ExtractMeta, LLM prompt, field validation, DeriveNPALevel
+│       │   ├── streaming.go      # Run() — parse + LLM metadata + write legist/plain + SSE stages
+│       │   ├── meta.go           # ExtractMeta (prompt from config), field validation, DeriveNPALevel
 │       │   ├── docx.go           # fumiama/go-docx parser
 │       │   ├── pdf.go            # pdftotext via exec
 │       │   ├── validate.go       # ValidateReader, Validate (magic bytes, size)
 │       │   └── file.go           # readerAtFile helper
+│       ├── embed/                # Ollama /api/embed batch client; legist embedding pass
+│       │   ├── ollama.go
+│       │   └── legist.go
 │       ├── sse/                  # Server-Sent Events
 │       │   └── broker.go         # Broker, Subscribe, Publish, Stream, Format
 │       ├── upload/               # multipart parse, FormData (POST /files, POST /diffs)
@@ -85,6 +89,14 @@ legist/
 
 ## Conventions
 
+### v1-alpha API stability
+- The API is **v1-alpha**: response JSON, **`application/lessed`** parsed artifact shape, SSE `progress` payloads, and related contracts **may change without backward compatibility** while the product stays in alpha. Clients and docs should be updated together with the backend.
+
+### Configuration — performance and network
+- Any setting that **materially affects performance or network load** (batch sizes, HTTP timeouts to LLM/embed services, retry counts, SSE progress throttle intervals, window sizes, etc.) MUST be driven by **environment variables** documented in `internal/config/config.go` — avoid hard-coding such values in application code.
+- Examples: `LLM_METADATA_WINDOW`, `LLM_METADATA_RETRIES`, `METADATA_LLM_HTTP_TIMEOUT_MS`; chunk embedding: `EMBED_BATCH_SIZE`, `EMBED_PROGRESS_INTERVAL_MS`, `EMBED_HTTP_TIMEOUT_MS` (see `internal/config/config.go`).
+- **LLM prompt text** is not hard-coded in Go: set **`METADATA_LLM_PROMPT_FILE`** to a UTF-8 file path (full instructions ending before the document fragment is appended). If unset, the bundled **`internal/config/metadata_prompt_default.txt`** (embedded at build time) is used.
+
 ### Language
 - **Code and comments** — English only
 - **Team communication** — Russian
@@ -102,20 +114,25 @@ legist/
 - Originals: `DATA_PATH/pdf/{file_id}` or `DATA_PATH/docx/{file_id}` (by mime)
 - Source links: `DATA_PATH/sources/{file_id}` → symlink to file in `pdf/` or `docx/`
 - Canonical plain text: `DATA_PATH/plain/{file_id}`
-- Legistoso artifact JSON: `DATA_PATH/legistoso/{file_id}`
+- **Lessed** artifact JSON: `DATA_PATH/lessed/{file_id}` — media type **`application/lessed`**. `sections[].chunks[]` hold `content` (full line/chunk text), `plain_start` / `plain_end`, section ids; optional `chunk_embeddings` (one vector per chunk, same DFS order as `content`) and `embedding_model` after embedding (`EMBED_MODEL`); re-embedded when the model changes or vectors are missing/stale.
 - Public laws (RAG base): `files.user_id IS NULL` in DB, populated by Python scripts
 - User files: `files.user_id = <user_id>`
 
 ### SSE Events
-All SSE events have shape: `{type: string, data: {...}}`
+SSE wire format is Stripe-like:
+- `event: message`
+- `data: {type: string, data: {...}}`
 
 Progress stages during file processing:
 - `parsing_started` — structure parsing started/completed (`sections_found` field)
 - `llm_requested` — metadata extraction starts once first `LLM_METADATA_WINDOW` chars are available (`chars` field)
 - `llm_skipped` — LLM not needed, all metadata provided explicitly
 - `llm_done` — LLM responded (`meta_score`, `meta_ok` fields)
-- `saving` — writing plain and legistoso artifacts
-- `done` — completed successfully
+- `saving` — writing plain and lessed artifacts
+- `embedding_started` — chunk embedding started (`chunks_total`)
+- `embedding` — embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`)
+- `embedding_done` — vectors written to lessed JSON
+- `done` — completed successfully (parse + metadata + embeddings when applicable)
 - `failed` — failed with error (`error`, `missing_fields` fields)
 
 Diff pipeline (channel = diff id; subscribe via `POST /diffs` or `GET /diffs/:id` with `Accept: text/event-stream`):
@@ -145,8 +162,9 @@ Diff pipeline (channel = diff id; subscribe via `POST /diffs` or `GET /diffs/:id
 - DOCX: Word heading styles (`Heading 1/2/3`, `Заголовок 1/2/3`) define hierarchy
 - PDF: regex patterns on pdftotext output define hierarchy; path passed directly to avoid stdin issues
 - Section IDs: hierarchical `s1`, `s1.2`, `s1.2.3`
-- `Flatten()` — all sections DFS (for embeddings)
-- `FlattenLeaves()` — leaf sections only (for Qdrant chunking)
+- `Flatten()` — all sections DFS
+- `FlattenLeaves()` — leaf sections only (for Qdrant / downstream chunk addressing)
+- `FlattenChunkContents()` — DFS chunk texts in embedding order (matches `chunk_embeddings`)
 - `MatchKey()` — stable diff key: `section_type:num` (survives renumbering)
 
 ### AKN Metadata
@@ -299,7 +317,7 @@ POST   /documents/:id/files       — add version (canonical); alias: POST /file
 
 GET    /files                     — list by `owner` (see Roles); ?document_id= forwards to /documents/:id/files; ?type=pdf|docx
 POST   /files                     — upload + create new Document (409 on duplicate identity)
-GET    /files/:id                 — metadata / parsed artifact (`Accept: application/legistoso`) / download / SSE (via Accept)
+GET    /files/:id                 — metadata / parsed artifact (`Accept: application/lessed`) / download / SSE (via Accept)
 PATCH  /files/:id                 — update Expression-level fields (version_date, language, pub_*, etc.)
 DELETE /files/:id                 — 409 if status=processing
 
@@ -356,10 +374,11 @@ POST /files (multipart)
       → DeriveNPALevel(subtype, author) — always deterministic, never from LLM
       → merge LLM results into Document (known fields win) → UpdateDocument
       → merge LLM results into File expression fields → UpdateFileMeta
-      → assemble legistoso: {file_id, document_id, plain_text_path, plain_text_len, meta, sections[].chunks, parsed_at, parser_version}
+      → assemble legist: {file_id, document_id, plain_text_path, plain_text_len, meta, sections[].chunks (content + plain offsets), parsed_at, parser_version}
       → SSE: saving
       → write DATA_PATH/plain/{file_id}
-      → write DATA_PATH/legistoso/{file_id}
+      → write DATA_PATH/lessed/{file_id}
+      → embed chunks (full `content` per chunk, batched) → update legist JSON with chunk_embeddings / embedding_model
       → UpdateStatus("done")
       → SSE: done
       → dispatch webhook: file.parsed
@@ -369,7 +388,7 @@ Tracking options:
 1. `POST /files` + `Accept: text/event-stream` — sync, stream progress in response
 2. `POST /files` + `Accept: application/json` — async, poll `GET /files/:id`
 3. `GET /files/:id` + `Accept: text/event-stream` — subscribe at any time
-4. `GET /files/:id` with `Accept: application/legistoso` — fetch legistoso artifact when done
+4. `GET /files/:id` with `Accept: application/lessed` — fetch lessed artifact when done
 5. Webhooks — `file.parsed` / `file.failed` events
 
 ## Diff Pipeline (planned)

@@ -1,10 +1,15 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
+
+//go:embed metadata_prompt_default.txt
+var embeddedMetadataLLMPrompt string
 
 type Config struct {
 	Addr       string
@@ -31,6 +36,14 @@ type Config struct {
 	// LLM metadata extraction settings
 	MetadataWindowSize int // chars of document text sent to metadata LLM (LLM_METADATA_WINDOW)
 	MetadataMaxRetries int // max LLM attempts per file (LLM_METADATA_RETRIES)
+	// MetadataLLMPrompt is loaded from METADATA_LLM_PROMPT_FILE or bundled default (see metadata_prompt_default.txt).
+	MetadataLLMPrompt     string
+	MetadataHTTPTimeoutMS int // per-request timeout for metadata Ollama calls (METADATA_LLM_HTTP_TIMEOUT_MS)
+
+	// Embedding (Ollama /api/embed) — batch size, SSE throttle, HTTP timeout
+	EmbedBatchSize           int
+	EmbedProgressIntervalMS  int
+	EmbedHTTPTimeoutMS       int
 }
 
 func Load() *Config {
@@ -40,7 +53,7 @@ func Load() *Config {
 		addr = fmt.Sprintf("0.0.0.0:%s", port)
 	}
 
-	return &Config{
+	cfg := &Config{
 		Addr:       addr,
 		DBPath:     getEnv("DB_PATH", "legist.db"),
 		DataPath:   getEnv("DATA_PATH", "../data"),
@@ -64,7 +77,37 @@ func Load() *Config {
 
 		MetadataWindowSize: getEnvInt("LLM_METADATA_WINDOW", 3000),
 		MetadataMaxRetries: getEnvInt("LLM_METADATA_RETRIES", 3),
+
+		MetadataHTTPTimeoutMS: getEnvInt("METADATA_LLM_HTTP_TIMEOUT_MS", 60000),
+
+		EmbedBatchSize:          getEnvInt("EMBED_BATCH_SIZE", 32),
+		EmbedProgressIntervalMS: getEnvInt("EMBED_PROGRESS_INTERVAL_MS", 500),
+		EmbedHTTPTimeoutMS:      getEnvInt("EMBED_HTTP_TIMEOUT_MS", 120000),
 	}
+	if cfg.EmbedBatchSize < 1 {
+		cfg.EmbedBatchSize = 32
+	}
+	if cfg.EmbedProgressIntervalMS < 0 {
+		cfg.EmbedProgressIntervalMS = 500
+	}
+	if cfg.EmbedHTTPTimeoutMS < 1 {
+		cfg.EmbedHTTPTimeoutMS = 120000
+	}
+	if cfg.MetadataHTTPTimeoutMS < 1 {
+		cfg.MetadataHTTPTimeoutMS = 60000
+	}
+	cfg.MetadataLLMPrompt = loadMetadataLLMPrompt(getEnv("METADATA_LLM_PROMPT_FILE", ""))
+	return cfg
+}
+
+func loadMetadataLLMPrompt(file string) string {
+	file = strings.TrimSpace(file)
+	if file != "" {
+		if b, err := os.ReadFile(file); err == nil && len(b) > 0 {
+			return string(b)
+		}
+	}
+	return embeddedMetadataLLMPrompt
 }
 
 func getEnv(key, fallback string) string {

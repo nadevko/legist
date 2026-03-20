@@ -38,8 +38,9 @@
 // @description     ## Content negotiation
 // @description     Use the `Accept` header to control response format:
 // @description     - `application/json` — JSON metadata (default)
-// @description     - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
-// @description       with `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)
+// @description     - `application/lessed` — parsed document structure and AKN metadata (when file status is `done`);
+// @description       `sections[].chunks[]` use `content` (full chunk text, embedded as a whole), `plain_start` / `plain_end` (rune offsets into canonical plain text);
+// @description       optional `chunk_embeddings[][]` (one vector per chunk in the same DFS order as `content`) and `embedding_model` when embedding completed
 // @description     - `text/event-stream` — SSE stream (async progress or sync upload)
 // @description     - `application/pdf`, `application/vnd...docx` — file download
 // @description
@@ -55,7 +56,7 @@
 // @description     Files are parsed asynchronously after upload. Track progress via:
 // @description     1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`
 // @description     2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`
-// @description     3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
+// @description     3. **Parsed result** — `GET /files/:id` with `Accept: application/lessed` (available when status=done)
 // @description     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 // @description
 // @description     ## Diffs
@@ -71,8 +72,11 @@
 // @description     | `llm_requested` | Metadata extraction starts as soon as first N chars are available |
 // @description     | `llm_skipped` | All metadata was provided explicitly, LLM not needed |
 // @description     | `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |
-// @description     | `saving` | Writing plain and legistoso artifacts to disk |
-// @description     | `done` | Processing complete |
+// @description     | `saving` | Writing plain and legist artifacts to disk |
+// @description     | `embedding_started` | Chunk embedding via Ollama started (`chunks_total`) |
+// @description     | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
+// @description     | `embedding_done` | Embeddings written to legist JSON |
+// @description     | `done` | Processing complete (parse + metadata + embeddings) |
 // @description     | `failed` | Processing failed; `error` and `missing_fields` present |
 // @description
 // @description     ## AKN metadata
@@ -82,6 +86,9 @@
 // @description     are stored on the File and are optional. If not supplied explicitly, the LLM
 // @description     attempts to extract them from the document text. After upload, expression-level
 // @description     fields can be corrected via `PATCH /files/:id`.
+// @description
+// @description     ## LLM prompts
+// @description     Metadata extraction instructions are not hard-coded in Go: set `METADATA_LLM_PROMPT_FILE` to a text file path, or rely on the bundled default (`internal/config/metadata_prompt_default.txt` embedded at build time). Tune `METADATA_LLM_HTTP_TIMEOUT_MS` for Ollama latency.
 // @description
 // @description     ## Webhooks
 // @description     Register endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.
@@ -94,8 +101,8 @@
 // @description     | Event | Description |
 // @description     |-------|-------------|
 // @description     | `file.created` | File uploaded |
-// @description     | `file.parsed` | Parsing and metadata extraction succeeded |
-// @description     | `file.failed` | Parsing or metadata extraction failed |
+// @description     | `file.parsed` | Parsing, metadata extraction, and chunk embedding (when required) succeeded |
+// @description     | `file.failed` | Parsing, metadata extraction, or embedding failed |
 // @description     | `file.deleted` | File deleted |
 // @description     | `diff.created` | Diff job started |
 // @description     | `diff.done` | Diff completed |
@@ -120,7 +127,7 @@
 // @tag.description AKN Work-level documents: create, list, get, patch, delete; add and list file versions under `/documents/:id/files`.
 //
 // @tag.name        Files
-// @tag.description File versions at `/files`: upload, list, get (JSON, legistoso, binary, SSE), patch expression-level metadata, delete.
+// @tag.description File versions at `/files`: upload, list, get (JSON, application/lessed, binary, SSE), patch expression-level metadata, delete.
 //
 // @tag.name        Diffs
 // @tag.description Compare two versions of the same document: multipart job creation, list, get, and SSE for async progress.

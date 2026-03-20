@@ -12,69 +12,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// LLM prompt
-// ---------------------------------------------------------------------------
-
-const metaPromptBase = `You are a legal metadata extractor for Belarusian normative legal acts (НПА).
-Extract metadata from the document fragment and return ONLY a valid JSON object.
-No markdown, no explanation, no code fences — raw JSON only.
-
-JSON schema (null for unknown fields):
-{
-  "FRBRWork": {
-    "FRBRdate":    string | null,  // REQUIRED adoption date "YYYY-MM-DD"
-    "FRBRauthor":  string | null,  // issuing body: "Парламент"|"Президент"|"Совет Министров"|"Министерство ..."|...
-    "FRBRcountry": string | null,  // always "by"
-    "FRBRsubtype": string | null,  // REQUIRED: "закон"|"кодекс"|"декрет"|"указ"|"постановление"|"приказ"|"решение"|"конституция"|"иное"
-    "FRBRnumber":  string | null,  // REQUIRED: "296-З", "15", "1234"
-    "FRBRname":    string | null   // short title
-  },
-  "FRBRExpression": {
-    "FRBRdate":          string | null,  // amendment date "YYYY-MM-DD" (if amended version)
-    "FRBRlanguage":      string | null,  // "rus" or "bel"
-    "FRBRversionNumber": string | null,  // "3" or "2024-01-15"
-    "versionLabel":      string | null   // "ред. от 15.01.2024"
-  },
-  "publication": {
-    "name":   string | null,
-    "date":   string | null,  // "YYYY-MM-DD"
-    "number": string | null,
-    "showAs": string | null
-  } | null,
-  "lifecycle": [
-    {
-      "type":   "generation"|"amendment"|"repeal"|"suspension",
-      "date":   string,
-      "source": string | null
-    }
-  ],
-  "passiveModifications": [
-    {
-      "type":    "substitution"|"insertion"|"deletion"|"split"|"merge",
-      "source":  string,
-      "section": string | null,
-      "date":    string | null
-    }
-  ],
-  "references": [
-    {
-      "eId":     string,
-      "href":    string,
-      "showAs":  string,
-      "type":    "TLCOrganization"|"TLCPerson"|"TLCConcept"|"TLCEvent"|"TLCTerm",
-      "article": string | null
-    }
-  ],
-  "classification": {
-    "keywords":   string[] | null,
-    "dictionary": string | null
-  } | null
-}
-
-Document fragment:
-`
-
-// ---------------------------------------------------------------------------
 // npaLevel derivation — deterministic, never ask LLM
 // ---------------------------------------------------------------------------
 
@@ -209,6 +146,8 @@ type MetaExtractorConfig struct {
 	MetadataModel string
 	MaxRetries    int
 	HTTPTimeout   time.Duration
+	// MetadataLLMPrompt is the full instruction prefix (from env-configured file); document windows are appended.
+	MetadataLLMPrompt string
 }
 
 // ExtractMeta sends the combined document window to the metadata LLM.
@@ -230,7 +169,8 @@ func ExtractMeta(ctx context.Context, cfg MetaExtractorConfig, startWindow, endW
 	if endWindow != "" && endWindow != startWindow {
 		combined = startWindow + "\n---\n" + endWindow
 	}
-	prompt := metaPromptBase + combined
+	prefix := strings.TrimSpace(cfg.MetadataLLMPrompt)
+	prompt := strings.TrimRight(prefix, "\n") + "\n" + combined
 
 	var best LLMMeta
 	bestScore := -1

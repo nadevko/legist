@@ -111,9 +111,18 @@ func Stream(c echo.Context, b *Broker, key string, terminalTypes ...string) erro
 	}
 }
 func Format(evt Event) (string, error) {
-	data, err := json.Marshal(evt.Data)
+	payload := struct {
+		Type string `json:"type"`
+		Data any    `json:"data"`
+	}{
+		Type: evt.Type,
+		Data: evt.Data,
+	}
+
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal sse event: %w", err)
 	}
-	return fmt.Sprintf("event: %s\ndata: %s\n\n", evt.Type, data), nil
+	// Stripe-style SSE: fixed `event: message` and JSON payload includes `type`.
+	return fmt.Sprintf("event: message\ndata: %s\n\n", data), nil
 }

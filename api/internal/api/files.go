@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/nadevko/legist/internal/auth"
+	embedder "github.com/nadevko/legist/internal/embed"
 	"github.com/nadevko/legist/internal/parser"
 	"github.com/nadevko/legist/internal/sse"
 	"github.com/nadevko/legist/internal/store"
@@ -20,7 +22,7 @@ import (
 	"github.com/nadevko/legist/internal/webhook"
 )
 
-const mimeTypeLegistoso = "application/legistoso"
+const mimeTypeLessed = "application/lessed"
 
 func badUpload(err error) error {
 	if err == nil {
@@ -142,11 +144,11 @@ func (s *Server) listFilesCore(c echo.Context, documentID *string) error {
 // @Security    BearerAuth
 // @Param       id       path   string   true  "File ID"
 // @Param       expand[] query  []string false "Expand: document"
-// @Param       Accept   header string   false "application/json | application/legistoso | application/pdf | application/vnd...docx | text/event-stream"
+// @Param       Accept   header string   false "application/json | application/lessed | application/pdf | application/vnd...docx | text/event-stream"
 // @Produce     json
 // @Success     200 {object} fileResponse
 // @Failure     404 {object} apiErrorResponse
-// @Failure     409 {object} apiErrorResponse "not_ready when Accept: application/legistoso and parsing incomplete"
+// @Failure     409 {object} apiErrorResponse "not_ready when Accept: application/lessed and parsing incomplete"
 // @Router      /files/{id} [get]
 func (s *Server) handleGetFile(c echo.Context) error {
 	f, err := s.resolveFile(c)
@@ -157,7 +159,7 @@ func (s *Server) handleGetFile(c echo.Context) error {
 	switch c.Request().Header.Get("Accept") {
 	case "text/event-stream":
 		return sse.Stream(c, s.broker, f.ID)
-	case mimeTypeLegistoso:
+	case mimeTypeLessed:
 		return s.serveParsedArtifact(c, f)
 	case "application/json", "":
 		return c.JSON(http.StatusOK, toFileResponse(*f))
@@ -172,16 +174,16 @@ func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 			"file is not yet parsed (status: "+f.Status+")")
 	}
 
-	parsedPath := filepath.Join(s.cfg.DataPath, "legistoso", f.ID)
+	parsedPath := filepath.Join(s.cfg.DataPath, "lessed", f.ID)
 	data, err := os.ReadFile(parsedPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errorf(http.StatusNotFound, "resource_missing",
-				"legistoso artifact not found for file: "+f.ID)
+				"lessed artifact not found for file: "+f.ID)
 		}
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	return c.Blob(http.StatusOK, mimeTypeLegistoso, data)
+	return c.Blob(http.StatusOK, mimeTypeLessed, data)
 }
 
 // handleUploadFile godoc
@@ -351,7 +353,7 @@ func (s *Server) handleDeleteFile(c echo.Context) error {
 	if err = os.Remove(filepath.Join(s.cfg.DataPath, "plain", f.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-	if err = os.Remove(filepath.Join(s.cfg.DataPath, "legistoso", f.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err = os.Remove(filepath.Join(s.cfg.DataPath, "lessed", f.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	if err = s.files.Delete(f.ID); err != nil {
@@ -446,9 +448,11 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 		KnownPubNumber:     strVal(f.PubNumber),
 
 		MetaExtractor: parser.MetaExtractorConfig{
-			OllamaBaseURL: s.cfg.OllamaBaseURL,
-			MetadataModel: s.cfg.MetadataModel,
-			MaxRetries:    s.cfg.MetadataMaxRetries,
+			OllamaBaseURL:     s.cfg.OllamaBaseURL,
+			MetadataModel:     s.cfg.MetadataModel,
+			MaxRetries:        s.cfg.MetadataMaxRetries,
+			HTTPTimeout:       time.Duration(s.cfg.MetadataHTTPTimeoutMS) * time.Millisecond,
+			MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
 		},
 		WindowSize:    s.cfg.MetadataWindowSize,
 		ParserVersion: "1",
@@ -462,6 +466,25 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 	})
 
 	if err != nil {
+		s.files.UpdateStatus(f.ID, "failed")
+		publish("failed", map[string]any{"file_id": f.ID, "error": err.Error()})
+		s.dispatcher.Dispatch(webhook.EventFileFailed, toFileResponse(*f))
+		return
+	}
+
+	embedCfg := embedder.Config{
+		OllamaBaseURL:    s.cfg.OllamaBaseURL,
+		Model:            s.cfg.EmbedModel,
+		BatchSize:        s.cfg.EmbedBatchSize,
+		ProgressInterval: time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
+		HTTPTimeout:      time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
+	}
+	if err := embedder.LegistEmbedIfNeeded(ctx, res.ParsedFilePath, embedCfg, func(p parser.ParseProgress) {
+		if p.Stage == parser.StageDone || p.Stage == parser.StageFailed {
+			return
+		}
+		publish("progress", p)
+	}); err != nil {
 		s.files.UpdateStatus(f.ID, "failed")
 		publish("failed", map[string]any{"file_id": f.ID, "error": err.Error()})
 		s.dispatcher.Dispatch(webhook.EventFileFailed, toFileResponse(*f))

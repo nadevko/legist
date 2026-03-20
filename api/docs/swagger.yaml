@@ -442,8 +442,8 @@ info:
     ## Content negotiation
     Use the `Accept` header to control response format:
     - `application/json` — JSON metadata (default)
-    - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
-    with `sections[].chunks[]` (chunk text + rune offsets in canonical plain text)
+    - `application/lessed` — parsed document structure and AKN metadata (when file status is `done`);
+      `sections[].chunks[]` carry `content` (full chunk text), `plain_start` / `plain_end` (rune offsets); optional `chunk_embeddings[][]` (same DFS order as chunks) and `embedding_model` when embedding completed
     - `text/event-stream` — SSE stream (async progress or sync upload)
     - `application/pdf`, `application/vnd...docx` — file download
 
@@ -459,7 +459,7 @@ info:
     Files are parsed asynchronously after upload. Track progress via:
     1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`
     2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`
-    3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
+    3. **Parsed result** — `GET /files/:id` with `Accept: application/lessed` (available when status=done)
     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 
     ## Diffs
@@ -475,8 +475,11 @@ info:
     | `llm_requested` | Metadata extraction starts as soon as first N chars are available |
     | `llm_skipped` | All metadata was provided explicitly, LLM not needed |
     | `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |
-    | `saving` | Writing plain and legistoso artifacts to disk |
-    | `done` | Processing complete |
+    | `saving` | Writing plain and legist artifacts to disk |
+    | `embedding_started` | Chunk embedding via Ollama started (`chunks_total`) |
+    | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
+    | `embedding_done` | Embeddings written to legist |
+    | `done` | Processing complete (parse + metadata + embeddings) |
     | `failed` | Processing failed; `error` and `missing_fields` present |
 
     ## AKN metadata
@@ -498,8 +501,8 @@ info:
     | Event | Description |
     |-------|-------------|
     | `file.created` | File uploaded |
-    | `file.parsed` | Parsing and metadata extraction succeeded |
-    | `file.failed` | Parsing or metadata extraction failed |
+    | `file.parsed` | Parsing, metadata extraction, and chunk embedding (when required) succeeded |
+    | `file.failed` | Parsing, metadata extraction, or embedding failed |
     | `file.deleted` | File deleted |
     | `diff.created` | Diff job started |
     | `diff.done` | Diff completed |
@@ -1198,7 +1201,7 @@ paths:
           type: string
         name: expand[]
         type: array
-      - description: application/json | application/legistoso | application/pdf |
+      - description: application/json | application/lessed | application/pdf |
           application/vnd...docx | text/event-stream
         in: header
         name: Accept
@@ -1215,7 +1218,7 @@ paths:
           schema:
             $ref: '#/definitions/api.apiErrorResponse'
         "409":
-          description: 'not_ready when Accept: application/legistoso and parsing incomplete'
+          description: 'not_ready when Accept: application/lessed and parsing incomplete'
           schema:
             $ref: '#/definitions/api.apiErrorResponse'
       security:
@@ -1791,7 +1794,7 @@ tags:
 - description: 'AKN Work-level documents: create, list, get, patch, delete; add and
     list file versions under `/documents/:id/files`.'
   name: Documents
-- description: 'File versions at `/files`: upload, list, get (JSON, legistoso, binary,
+- description: 'File versions at `/files`: upload, list, get (JSON, legist, binary,
     SSE), patch expression-level metadata, delete.'
   name: Files
 - description: 'Compare two versions of the same document: multipart job creation,

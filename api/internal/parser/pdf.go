@@ -40,7 +40,7 @@ func (p *pdfParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pdftotext: %w", err)
 	}
-	return parseText(string(out)), nil
+	return parseText(string(out))
 }
 
 // pdfParseByPath is preferred when the file path is available.
@@ -51,11 +51,11 @@ func pdfParseByPath(path string) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pdftotext: %w", err)
 	}
-	return parseText(string(out)), nil
+	return parseText(string(out))
 }
 
 // parseText builds a Document from flat pdftotext output.
-func parseText(text string) *Document {
+func parseText(text string) (*Document, error) {
 	lines := strings.Split(text, "\n")
 	result := &Document{}
 	counter := &idCounter{}
@@ -100,7 +100,7 @@ func parseText(text string) *Document {
 			}
 		} else if len(stack) > 0 {
 			cur := getSection()
-			cur.Chunks = append(cur.Chunks, Chunk{Text: line})
+			cur.Chunks = append(cur.Chunks, result.appendChunk(line))
 		} else {
 			// Fallback: text before first heading is still part of plain text and a section.
 			sec := Section{
@@ -108,16 +108,18 @@ func parseText(text string) *Document {
 				Label:       "body",
 				Level:       0,
 				SectionType: SectionUnknown,
-				Chunks:      []Chunk{{Text: line}},
+				Chunks:      []ChunkRef{result.appendChunk(line)},
 			}
 			result.Sections = append(result.Sections, sec)
 			stack = []entry{{idx: len(result.Sections) - 1}}
 		}
 	}
 	result.PlainText = NormalizePlainText(strings.Join(rawParts, "\n"))
-	assignChunkOffsets(result)
+	if err := assignChunkOffsets(result); err != nil {
+		return nil, fmt.Errorf("assign chunk offsets: %w", err)
+	}
 
-	return result
+	return result, nil
 }
 
 func detectHeading(line string) (level int, ok bool) {

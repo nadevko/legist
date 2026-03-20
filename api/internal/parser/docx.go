@@ -73,21 +73,23 @@ func (p *docxParser) Parse(r io.ReaderAt, size int64) (*Document, error) {
 			}
 		} else if len(stack) > 0 {
 			cur := getSection()
-			cur.Chunks = append(cur.Chunks, Chunk{Text: text})
+			cur.Chunks = append(cur.Chunks, result.appendChunk(text))
 		} else {
 			sec := Section{
 				ID:          counter.next(0),
 				Label:       "body",
 				Level:       0,
 				SectionType: SectionUnknown,
-				Chunks:      []Chunk{{Text: text}},
+				Chunks:      []ChunkRef{result.appendChunk(text)},
 			}
 			result.Sections = append(result.Sections, sec)
 			stack = []entry{{idx: len(result.Sections) - 1}}
 		}
 	}
 	result.PlainText = NormalizePlainText(strings.Join(rawParts, "\n"))
-	assignChunkOffsets(result)
+	if err := assignChunkOffsets(result); err != nil {
+		return nil, fmt.Errorf("assign chunk offsets: %w", err)
+	}
 
 	return result, nil
 }

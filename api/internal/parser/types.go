@@ -51,16 +51,16 @@ type Section struct {
 	SectionType SectionType    `json:"section_type"`
 	Level       int            `json:"level"`
 	Path        []string       `json:"path,omitempty"`
-	Chunks      []Chunk        `json:"chunks,omitempty"`
+	Chunks      []ChunkRef     `json:"chunks,omitempty"`
 	Children    []Section      `json:"children,omitempty"`
 	References  []TLCReference `json:"references,omitempty"`
 }
 
-// Chunk points to a text fragment inside canonical plain text.
-type Chunk struct {
-	Text       string `json:"text"`
-	PlainStart int    `json:"plain_start"` // rune offset, inclusive
-	PlainEnd   int    `json:"plain_end"`   // rune offset, exclusive
+// ChunkRef is one embeddable chunk: full text plus its span in canonical plain text.
+type ChunkRef struct {
+	Content    string `json:"content"`               // chunk text (embedded as a whole)
+	PlainStart int    `json:"plain_start"`           // rune offset, inclusive
+	PlainEnd   int    `json:"plain_end"`             // rune offset, exclusive
 	SectionID  string `json:"section_id,omitempty"`
 	SectionNum string `json:"section_num,omitempty"`
 }
@@ -95,6 +95,11 @@ func (d *Document) Flatten() []Section {
 	return out
 }
 
+// appendChunk returns a chunk ref with the given line text (offsets filled in assignChunkOffsets).
+func (d *Document) appendChunk(line string) ChunkRef {
+	return ChunkRef{Content: line}
+}
+
 func (d *Document) FlattenLeaves() []Section {
 	var out []Section
 	var walk func([]Section)
@@ -111,7 +116,7 @@ func (d *Document) FlattenLeaves() []Section {
 	return out
 }
 
-// ParsedFile is what gets written to DATA_PATH/legistoso/{file_id}.
+// ParsedFile is what gets written to DATA_PATH/lessed/{file_id} (media type application/lessed).
 // Combines the Document section tree with AKN-shaped metadata.
 type ParsedFile struct {
 	FileID        string     `json:"file_id"`
@@ -123,6 +128,51 @@ type ParsedFile struct {
 
 	ParsedAt      time.Time `json:"parsed_at"`
 	ParserVersion string    `json:"parser_version"`
+
+	// ChunkEmbeddings — one vector per chunk in FlattenChunkContents order (DFS section order).
+	ChunkEmbeddings [][]float64 `json:"chunk_embeddings,omitempty"`
+	EmbeddingModel  string      `json:"embedding_model,omitempty"`
+}
+
+// FlattenChunkContents returns each chunk's content in the same order as assignChunkOffsets (DFS over sections).
+func FlattenChunkContents(sections []Section) []string {
+	var out []string
+	var walk func([]Section)
+	walk = func(ss []Section) {
+		for i := range ss {
+			for _, ch := range ss[i].Chunks {
+				out = append(out, ch.Content)
+			}
+			walk(ss[i].Children)
+		}
+	}
+	walk(sections)
+	return out
+}
+
+// EmbeddingsCurrent reports whether stored embeddings match chunk contents and expectedModel.
+func (pf *ParsedFile) EmbeddingsCurrent(expectedModel string) bool {
+	texts := FlattenChunkContents(pf.Sections)
+	n := len(texts)
+	if n == 0 {
+		return true
+	}
+	if pf.EmbeddingModel != expectedModel {
+		return false
+	}
+	if len(pf.ChunkEmbeddings) != n {
+		return false
+	}
+	for i, t := range texts {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if len(pf.ChunkEmbeddings[i]) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ParsedMeta is the assembled AKN metadata for one file/version.

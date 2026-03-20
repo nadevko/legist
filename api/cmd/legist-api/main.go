@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	_ "github.com/nadevko/legist/docs"
 	"github.com/nadevko/legist/internal/api"
@@ -33,6 +34,13 @@ func main() {
 	)
 	log.Printf("qdrant: %s:%s", cfg.QdrantHost, cfg.QdrantGRPCPort)
 	log.Printf("ollama: %s", cfg.OllamaBaseURL)
+	log.Printf("embed: model=%s batch=%d progress_interval_ms=%d http_timeout_ms=%d",
+		cfg.EmbedModel, cfg.EmbedBatchSize, cfg.EmbedProgressIntervalMS, cfg.EmbedHTTPTimeoutMS)
+	metaPrompt := "embedded default (metadata_prompt_default.txt)"
+	if p := os.Getenv("METADATA_LLM_PROMPT_FILE"); p != "" {
+		metaPrompt = p
+	}
+	log.Printf("metadata llm: prompt_file=%q http_timeout_ms=%d", metaPrompt, cfg.MetadataHTTPTimeoutMS)
 
 	if err := srv.Start(); err != nil {
 		log.Fatalf("server error: %v", err)

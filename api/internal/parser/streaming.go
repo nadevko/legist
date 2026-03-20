@@ -15,9 +15,12 @@ const (
 	StageLLMRequested = "llm_requested"
 	StageLLMSkipped   = "llm_skipped"
 	StageLLMDone      = "llm_done"
-	StageSaving       = "saving"
-	StageDone         = "done"
-	StageFailed       = "failed"
+	StageSaving            = "saving"
+	StageEmbeddingStarted  = "embedding_started"
+	StageEmbedding         = "embedding"
+	StageEmbeddingDone     = "embedding_done"
+	StageDone              = "done"
+	StageFailed            = "failed"
 )
 
 // ParseProgress is emitted on each pipeline stage transition.
@@ -29,6 +32,10 @@ type ParseProgress struct {
 	MetaOK        *bool    `json:"meta_ok,omitempty"`
 	MissingFields []string `json:"missing_fields,omitempty"`
 	Error         string   `json:"error,omitempty"`
+
+	EmbeddingPercent int `json:"embedding_percent,omitempty"`
+	ChunksEmbedded   int `json:"chunks_embedded,omitempty"`
+	ChunksTotal      int `json:"chunks_total,omitempty"`
 }
 
 type ProgressFunc func(ParseProgress)
@@ -99,7 +106,7 @@ type PipelineResult struct {
 	References           []TLCReference
 	Keywords             []string
 
-	// ParsedFilePath is the path to the written legistoso artifact.
+	// ParsedFilePath is the path to the written application/lessed artifact.
 	ParsedFilePath string
 	PlainTextPath  string
 }
@@ -266,7 +273,7 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 	res.NPALevel = DeriveNPALevel(res.Subtype, res.Author)
 
 	// --- 8. Assemble and write artifacts ---
-	emit(StageSaving, "writing plain and legistoso artifacts")
+	emit(StageSaving, "writing plain and lessed artifacts")
 
 	pf := &ParsedFile{
 		FileID:     cfg.FileID,
@@ -332,9 +339,9 @@ func writeArtifacts(cfg PipelineConfig, parsed any, plain string) (parsedPath, p
 		return "", "", fmt.Errorf("write plain: %w", err)
 	}
 
-	parsedPath = filepath.Join(cfg.DataPath, "legistoso", cfg.FileID)
+	parsedPath = filepath.Join(cfg.DataPath, "lessed", cfg.FileID)
 	if err = os.MkdirAll(filepath.Dir(parsedPath), 0755); err != nil {
-		return "", "", fmt.Errorf("mkdir legistoso: %w", err)
+		return "", "", fmt.Errorf("mkdir lessed: %w", err)
 	}
 	data, err := json.MarshalIndent(parsed, "", "  ")
 	if err != nil {
