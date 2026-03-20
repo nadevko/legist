@@ -70,7 +70,13 @@ func (b *Broker) Publish(key string, evt Event) {
 	}
 }
 
-func Stream(c echo.Context, b *Broker, key string) error {
+// Stream streams SSE events for key until one of terminalTypes is received.
+// If terminalTypes is empty, defaults to "done" and "failed".
+func Stream(c echo.Context, b *Broker, key string, terminalTypes ...string) error {
+	term := terminalTypes
+	if len(term) == 0 {
+		term = []string{"done", "failed"}
+	}
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
@@ -96,8 +102,10 @@ func Stream(c echo.Context, b *Broker, key string) error {
 				return nil
 			}
 			c.Response().Flush()
-			if evt.Type == "done" || evt.Type == "failed" {
-				return nil
+			for _, t := range term {
+				if evt.Type == t {
+					return nil
+				}
 			}
 		}
 	}

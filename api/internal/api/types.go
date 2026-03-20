@@ -164,6 +164,17 @@ type sessionResponse struct {
 	Created   int64  `json:"created"`
 }
 
+type diffResponse struct {
+	ID                string   `json:"id"`
+	Object            string   `json:"object"`
+	DocumentID        string   `json:"document_id"`
+	LeftFileID        string   `json:"left_file_id"`
+	RightFileID       string   `json:"right_file_id"`
+	Status            string   `json:"status"`
+	SimilarityPercent *float64 `json:"similarity_percent,omitempty"`
+	Created           int64    `json:"created"`
+}
+
 type fileResponse struct {
 	ID         string  `json:"id"`
 	Object     string  `json:"object"` // "file"

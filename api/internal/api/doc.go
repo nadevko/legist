@@ -50,6 +50,12 @@
 // @description     3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
 // @description     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 // @description
+// @description     ## Diffs
+// @description     `POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**
+// @description     (existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**
+// @description     (upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).
+// @description     Use `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.
+// @description
 // @description     ### SSE progress stages
 // @description     | Stage | Description |
 // @description     |-------|-------------|

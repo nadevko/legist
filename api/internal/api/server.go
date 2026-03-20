@@ -23,6 +23,7 @@ type Server struct {
 	resets      *store.PasswordResetStore
 	files       *store.FileStore
 	documents   *store.DocumentStore
+	diffs       *store.DiffStore
 	idempotency *store.IdempotencyStore
 	webhooks    *store.WebhookStore
 	dispatcher  *webhook.Dispatcher
@@ -40,6 +41,7 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 		resets:      store.NewPasswordResetStore(db),
 		files:       store.NewFileStore(db),
 		documents:   store.NewDocumentStore(db),
+		diffs:       store.NewDiffStore(db),
 		idempotency: store.NewIdempotencyStore(db),
 		webhooks:    webhookStore,
 		dispatcher:  webhook.NewDispatcher(webhookStore),
@@ -121,6 +123,11 @@ func (s *Server) registerRoutes() {
 	p.GET("/documents/:id/files", s.handleListDocumentFiles)   // canonical list versions
 	p.POST("/documents/:id/files", s.handleUploadDocumentFile) // canonical add version
 
+	// diffs
+	p.POST("/diffs", s.handleCreateDiff)
+	p.GET("/diffs", s.handleListDiffs)
+	p.GET("/diffs/:id", s.handleGetDiff)
+
 	// webhooks
 	p.POST("/webhooks", s.handleCreateWebhook)
 	p.GET("/webhooks", s.handleListWebhooks)
@@ -154,6 +161,14 @@ func (s *Server) LoadResource(resource, id string) any {
 			return nil
 		}
 		return toDocumentResponse(*d)
+	case "diff":
+		d, err := s.diffs.GetByID(id)
+		if err != nil {
+			return nil
+		}
+		return toDiffResponse(*d)
+	case "left_file", "right_file":
+		return s.LoadResource("file", id)
 	default:
 		return nil
 	}

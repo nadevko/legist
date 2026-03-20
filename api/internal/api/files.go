@@ -16,31 +16,17 @@ import (
 	"github.com/nadevko/legist/internal/parser"
 	"github.com/nadevko/legist/internal/sse"
 	"github.com/nadevko/legist/internal/store"
+	"github.com/nadevko/legist/internal/upload"
 	"github.com/nadevko/legist/internal/webhook"
 )
 
 const mimeTypeLegistoso = "application/legistoso"
 
-// fileUploadRequest holds all optional metadata fields from multipart form.
-type fileUploadRequest struct {
-	// Work-level — only used when POST /files creates a new Document.
-	Subtype string `form:"subtype"`
-	Number  string `form:"number"`
-	Author  string `form:"author"`
-	Date    string `form:"date"`
-	Country string `form:"country"`
-	Name    string `form:"name"`
-
-	// Expression-level — always applied to the File.
-	VersionDate   string `form:"version_date"`
-	VersionNumber string `form:"version_number"`
-	VersionLabel  string `form:"version_label"`
-	Language      string `form:"language"`
-
-	// Publication — always applied to the File.
-	PubName   string `form:"pub_name"`
-	PubDate   string `form:"pub_date"`
-	PubNumber string `form:"pub_number"`
+func badUpload(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errorf(http.StatusBadRequest, "invalid_request", err.Error())
 }
 
 // filePatchRequest carries the fields that can be updated after upload.
@@ -213,7 +199,12 @@ func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 // @Failure     404 {object} apiErrorResponse "document_id not found"
 // @Router      /files [post]
 func (s *Server) handleUploadFile(c echo.Context) error {
-	if docID := c.FormValue("document_id"); docID != "" {
+	// Parse multipart before any FormValue — otherwise Echo uses ~32MiB default and our 52MiB cap never applies.
+	if err := upload.ParseMultipart(c); err != nil {
+		return badUpload(err)
+	}
+	docID := strings.TrimSpace(c.FormValue("document_id"))
+	if docID != "" {
 		if _, err := s.documents.GetByID(docID); errors.Is(err, sql.ErrNoRows) {
 			return errorf(http.StatusNotFound, "resource_missing", "no such document: "+docID)
 		} else if err != nil {
@@ -251,6 +242,9 @@ func (s *Server) handleUploadDocumentFile(c echo.Context) error {
 		return errorf(http.StatusNotFound, "resource_missing", "no such document: "+docID)
 	} else if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+	if err := upload.ParseMultipart(c); err != nil {
+		return badUpload(err)
 	}
 	return s.uploadFile(c, &docID)
 }
@@ -335,12 +329,64 @@ func (s *Server) handleDeleteFile(c echo.Context) error {
 	return c.JSON(http.StatusOK, deleted(f.ID, "file"))
 }
 
+// processFileChannel configures SSE publishing when the pipeline runs in a diff context.
+// Key is the broker channel (e.g. diff ID). DoneEvent/FailedEvent rename terminal events so
+// diff SSE streams do not end on per-file completion.
+type processFileChannel struct {
+	Key             string
+	DoneEvent       string // default "done"
+	FailedEvent     string // default "failed"
+}
+
 // processFile runs the parse+extract pipeline in a goroutine.
 func (s *Server) processFile(f *store.File, doc *store.Document) {
+	s.processFileWithChannel(f, doc, nil)
+}
+
+func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *processFileChannel) {
 	ctx := context.Background()
 
+	key := f.ID
+	doneType := "done"
+	failedType := "failed"
+	diffChannel := false
+	if ch != nil && ch.Key != "" {
+		key = ch.Key
+		if ch.Key != f.ID {
+			diffChannel = true
+		}
+		if ch.DoneEvent != "" {
+			doneType = ch.DoneEvent
+		}
+		if ch.FailedEvent != "" {
+			failedType = ch.FailedEvent
+		}
+	}
+
 	publish := func(evtType string, data any) {
-		s.broker.Publish(f.ID, sse.Event{Type: evtType, Data: data})
+		outType := evtType
+		outData := data
+		if diffChannel {
+			switch evtType {
+			case "progress":
+				if p, ok := data.(parser.ParseProgress); ok {
+					outData = map[string]any{"file_id": f.ID, "progress": p}
+				}
+			case "done":
+				outType = doneType
+				outData = map[string]any{"file_id": f.ID, "status": "done"}
+			case "failed":
+				outType = failedType
+				if m, ok := data.(map[string]any); ok {
+					outData = map[string]any{"file_id": f.ID, "error": m["error"]}
+				}
+			}
+		} else {
+			if evtType == "done" {
+				outData = map[string]any{"file_id": f.ID, "status": "done"}
+			}
+		}
+		s.broker.Publish(key, sse.Event{Type: outType, Data: outData})
 	}
 
 	s.files.UpdateStatus(f.ID, "processing")
@@ -419,43 +465,39 @@ func (s *Server) processFile(f *store.File, doc *store.Document) {
 	s.dispatcher.Dispatch(webhook.EventFileParsed, toFileResponse(*f))
 }
 
-// uploadFile is the shared implementation for both POST /files and
-// POST /documents/:id/files.
-func (s *Server) uploadFile(c echo.Context, documentID *string) error {
+// saveFormFile persists one multipart file field and creates DB rows.
+// Prerequisites: upload.ParseMultipart(c) then upload.BindFormData(c) (or upload.PrepareForm for both in one call).
+// It does not dispatch webhooks or start the parse pipeline.
+func (s *Server) saveFormFile(c echo.Context, fieldName string, documentID *string, req upload.FormData) (*store.File, *store.Document, error) {
 	userID := auth.UserID(c)
 
-	var req fileUploadRequest
-	if err := c.Bind(&req); err != nil {
-		return errorf(http.StatusBadRequest, "invalid_request", "invalid form data")
-	}
-
-	fh, err := c.FormFile("file")
+	fh, err := c.FormFile(fieldName)
 	if err != nil {
-		return errorf(http.StatusBadRequest, "parameter_missing", "file is required", "file")
+		return nil, nil, errorf(http.StatusBadRequest, "parameter_missing", "file is required", fieldName)
 	}
 	mime := strings.Split(fh.Header.Get("Content-Type"), ";")[0]
 	if !allowedMIME[mime] {
-		return errorf(http.StatusBadRequest, "invalid_parameter_value",
-			"unsupported mime type: "+mime, "file")
+		return nil, nil, errorf(http.StatusBadRequest, "invalid_parameter_value",
+			"unsupported mime type: "+mime, fieldName)
 	}
 	src, err := fh.Open()
 	if err != nil {
-		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	defer src.Close()
 
 	if err = parser.ValidateReader(src, fh.Size, mime); err != nil {
-		return errorf(http.StatusBadRequest, "invalid_file", err.Error(), "file")
+		return nil, nil, errorf(http.StatusBadRequest, "invalid_file", err.Error(), fieldName)
 	}
 	if _, err = src.Seek(0, io.SeekStart); err != nil {
-		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
 	fileID := newID("file")
 	dir := filepath.Join(s.cfg.DataPath, "files", fileID)
 	dst := filepath.Join(dir, fh.Filename)
 	if err = saveFile(src, dir, dst); err != nil {
-		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
 	var doc *store.Document
@@ -474,19 +516,19 @@ func (s *Server) uploadFile(c echo.Context, documentID *string) error {
 			doc.Country = "by"
 		}
 		if err = s.documents.Create(doc); err != nil {
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
 			if errors.Is(err, store.ErrDuplicate) {
-				return errorf(http.StatusConflict, "duplicate_document",
+				return nil, nil, errorf(http.StatusConflict, "duplicate_document",
 					"document with this subtype, number and date already exists")
 			}
-			return errorf(http.StatusInternalServerError, "server_error", "internal error")
+			return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 		}
 		documentID = &doc.ID
 	} else {
 		doc, err = s.documents.GetByID(*documentID)
 		if err != nil {
-			os.RemoveAll(dir)
-			return errorf(http.StatusInternalServerError, "server_error", "internal error")
+			_ = os.RemoveAll(dir)
+			return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
 		}
 	}
 
@@ -504,8 +546,23 @@ func (s *Server) uploadFile(c echo.Context, documentID *string) error {
 	applyExpressionFields(f, req)
 
 	if err = s.files.Create(f); err != nil {
-		os.RemoveAll(dir)
-		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		_ = os.RemoveAll(dir)
+		return nil, nil, errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+
+	return f, doc, nil
+}
+
+// uploadFile completes upload after upload.ParseMultipart(c) has been called (bind + save + pipeline).
+func (s *Server) uploadFile(c echo.Context, documentID *string) error {
+	req, err := upload.BindFormData(c)
+	if err != nil {
+		return badUpload(err)
+	}
+
+	f, doc, err := s.saveFormFile(c, "file", documentID, req)
+	if err != nil {
+		return err
 	}
 
 	s.dispatcher.Dispatch(webhook.EventFileCreated, toFileResponse(*f))
@@ -533,7 +590,7 @@ func (s *Server) resolveFile(c echo.Context) (*store.File, error) {
 
 // --- helpers ---
 
-func applyExpressionFields(f *store.File, req fileUploadRequest) {
+func applyExpressionFields(f *store.File, req upload.FormData) {
 	if req.VersionDate != "" {
 		f.VersionDate = &req.VersionDate
 	}

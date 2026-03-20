@@ -153,3 +153,20 @@ type WebhookEvent struct {
 	Attempts   int       `db:"attempts"`
 	CreatedAt  time.Time `db:"created_at"`
 }
+
+// Diff compares two file versions of the same document.
+// UserID is nil for diffs on public documents (future); owned diffs use the authenticated user.
+type Diff struct {
+	ID          string  `db:"id"`
+	UserID      *string `db:"user_id"`
+	DocumentID  string  `db:"document_id"`
+	LeftFileID  string  `db:"left_file_id"`
+	RightFileID string  `db:"right_file_id"`
+
+	Status string `db:"status"` // pending | processing | done | failed
+
+	SimilarityPercent *float64 `db:"similarity_percent"`
+	DiffData          string   `db:"diff_data"`
+
+	CreatedAt time.Time `db:"created_at"`
+}

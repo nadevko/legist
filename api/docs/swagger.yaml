@@ -66,6 +66,25 @@ definitions:
       object:
         type: string
     type: object
+  api.diffResponse:
+    properties:
+      created:
+        type: integer
+      document_id:
+        type: string
+      id:
+        type: string
+      left_file_id:
+        type: string
+      object:
+        type: string
+      right_file_id:
+        type: string
+      similarity_percent:
+        type: number
+      status:
+        type: string
+    type: object
   api.documentRequest:
     properties:
       author:
@@ -160,6 +179,20 @@ definitions:
       version_label:
         type: string
       version_number:
+        type: string
+    type: object
+  api.listResponse-api_diffResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.diffResponse'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
+        type: string
+      object:
+        description: '"list"'
         type: string
     type: object
   api.listResponse-api_documentResponse:
@@ -416,6 +449,12 @@ info:
     3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 
+    ## Diffs
+    `POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**
+    (existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**
+    (upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).
+    Use `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.
+
     ### SSE progress stages
     | Stage | Description |
     |-------|-------------|
@@ -501,6 +540,168 @@ paths:
       summary: Ask a question about laws (RAG-based Q&A)
       tags:
       - chat
+  /diffs:
+    get:
+      parameters:
+      - description: Filter by document
+        in: query
+        name: document_id
+        type: string
+      - description: Filter by left or right file
+        in: query
+        name: file_id
+        type: string
+      - description: pending|processing|done|failed
+        in: query
+        name: status
+        type: string
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor
+        in: query
+        name: starting_after
+        type: string
+      - description: Cursor
+        in: query
+        name: ending_before
+        type: string
+      - collectionFormat: csv
+        description: 'Expand: document, left_file, right_file'
+        in: query
+        items:
+          type: string
+        name: expand[]
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.listResponse-api_diffResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List diffs for the current user
+      tags:
+      - diffs
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: 'With right_file_id: compare two existing files'
+        in: formData
+        name: left_file_id
+        type: string
+      - description: 'With left_file_id: compare two existing files'
+        in: formData
+        name: right_file_id
+        type: string
+      - description: 'With left_file_id or right_file_id: new version to compare'
+        in: formData
+        name: file
+        type: file
+      - description: 'With file_right: create document and compare'
+        in: formData
+        name: file_left
+        type: file
+      - description: 'With file_left: create document and compare'
+        in: formData
+        name: file_right
+        type: file
+      - description: Work metadata when creating document (two files)
+        in: formData
+        name: subtype
+        type: string
+      - description: Work metadata
+        in: formData
+        name: number
+        type: string
+      - description: Work metadata
+        in: formData
+        name: author
+        type: string
+      - description: Work metadata
+        in: formData
+        name: date
+        type: string
+      - description: Work metadata
+        in: formData
+        name: country
+        type: string
+      - description: Work metadata
+        in: formData
+        name: name
+        type: string
+      - description: application/json | text/event-stream
+        in: header
+        name: Accept
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.diffResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 'Create a diff (multipart: two file IDs, ID + file, or two files)'
+      tags:
+      - diffs
+  /diffs/{id}:
+    get:
+      parameters:
+      - description: Diff ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - collectionFormat: csv
+        description: 'Expand: document, left_file, right_file'
+        in: query
+        items:
+          type: string
+        name: expand[]
+        type: array
+      - description: application/json | text/event-stream
+        in: header
+        name: Accept
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.diffResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get diff by ID or stream pipeline (SSE)
+      tags:
+      - diffs
   /documents:
     get:
       parameters:

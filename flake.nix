@@ -32,6 +32,21 @@
     in
     {
       apps = k.forAllPkgs self { } (pkgs: {
+        swagen = {
+          type = "app";
+          program =
+            toString
+            <| pkgs.writeScript "swagen" ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+              cd "${self}/api"
+              ${pkgs.go-swag}/bin/swag init -g doc.go -d ./internal/api -o docs
+              if [[ -f docs/swagger.json ]]; then
+                mv -f docs/swagger.json docs/v1-alpha.json
+              fi
+            '';
+        };
+
         tunnel = {
           type = "app";
           program =
@@ -44,10 +59,14 @@
               }
               trap cleanup EXIT SIGINT SIGTERM
 
-              swag init -g doc.go -d ./internal/api -o docs
+              cd "${self}/api"
+              ${pkgs.go-swag}/bin/swag init -g doc.go -d ./internal/api -o docs
+              if [[ -f docs/swagger.json ]]; then
+                mv -f docs/swagger.json docs/v1-alpha.json
+              fi
 
               cloudflared tunnel run --token "$CLOUDFLARE_TOKEN" &
-              go run ./cmd/server/main.go
+              go run ./cmd/legist-api/main.go
             '';
         };
       });

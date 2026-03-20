@@ -26,7 +26,8 @@ legist/
 │       │   ├── server.go         # Server struct, NewServer, registerRoutes
 │       │   ├── auth.go           # /users, /sessions, /tokens handlers
 │       │   ├── users.go          # password reset handlers
-│       │   ├── files.go          # file upload, list, get, patch, delete (parsed via Accept: application/legistoso)
+│       │   ├── files.go          # file upload, list, get, patch, delete; uses internal/upload for multipart
+│       │   ├── diffs.go          # POST/GET /diffs; async diff pipeline + SSE; multipart (3 modes)
 │       │   ├── documents.go      # document CRUD handlers
 │       │   ├── webhooks.go       # webhook endpoint CRUD + events
 │       │   ├── chat.go           # /chat handler (stub)
@@ -57,15 +58,18 @@ legist/
 │       │   └── file.go           # readerAtFile helper
 │       ├── sse/                  # Server-Sent Events
 │       │   └── broker.go         # Broker, Subscribe, Publish, Stream, Format
+│       ├── upload/               # multipart parse, FormData (POST /files, POST /diffs)
+│       │   └── upload.go
 │       ├── store/                # sqlx stores per resource
 │       │   ├── db.go             # Open(path), schema, WAL pragmas
-│       │   ├── models.go         # User, Session, File, Document, PasswordReset,
+│       │   ├── models.go         # User, Session, File, Document, Diff, PasswordReset,
 │       │   │                     # IdempotencyKey, WebhookEndpoint, WebhookEvent
 │       │   │                     # + ErrDuplicate, ErrNotOwner, IsUniqueViolation
 │       │   ├── users.go          # UserStore: Create, GetByID, GetByEmail, UpdateEmail, UpdatePassword, Delete
 │       │   ├── sessions.go       # SessionStore: Create, GetByTokenHash, ListByUser, DeleteByID, DeleteAllByUser
 │       │   ├── files.go          # FileStore: Create, GetByID, List(filter, params), UpdateStatus, UpdateMeta, Delete
 │       │   ├── documents.go      # DocumentStore: Create, GetByID, List, ApplyUpdate, Delete
+│       │   ├── diffs.go          # DiffStore: Create, GetByID, List, UpdateStatus, UpdateResult
 │       │   ├── password_resets.go# PasswordResetStore: Create, GetByTokenHash, Delete
 │       │   ├── idempotency.go    # IdempotencyStore: Get, Lock, Set
 │       │   └── webhooks.go       # WebhookStore: endpoint CRUD, events CRUD, ListEndpointsByEvent
@@ -75,7 +79,7 @@ legist/
 │   ├── nixos/default.nix         # qdrant + ollama NixOS services
 │   └── pkgs/                     # custom nix packages
 ├── shell.nix                     # dev shell (go, gopls, poppler_utils, etc.)
-└── flake.nix                     # nix flake (gomod2nix, kasumi, apps.swagen)
+└── flake.nix                     # nix flake (gomod2nix, kasumi, apps.swagen, apps.tunnel)
 ```
 
 ## Conventions
@@ -88,7 +92,7 @@ legist/
 ### Swagger
 - Version locked at `v1-alpha` — never bump
 - Single definition, no dropdown selector
-- Generated via `nix run ..#swagen` (runs `swag init -g doc.go -d ./internal/api -o docs`, renames to `v1-alpha.json`)
+- Generated via flake app `swagen` at **repository root** (parent of `api/`): `nix run .#swagen` from the repo root, or `nix run ..#swagen` from `api/`. Runs `swag init -g doc.go -d ./internal/api -o docs` inside `api/`, then renames `docs/swagger.json` → `docs/v1-alpha.json`.
 - Served at `/swagger/v1-alpha.json` as static file
 - Host hardcoded as `legist.nadevko.cc`
 
@@ -109,6 +113,13 @@ Progress stages during file processing:
 - `saving` — writing parsed.json
 - `done` — completed successfully
 - `failed` — failed with error (`error`, `missing_fields` fields)
+
+Diff pipeline (channel = diff id; subscribe via `POST /diffs` or `GET /diffs/:id` with `Accept: text/event-stream`):
+- `document_will_be_created` / `document_created` — only when uploading `file_left` + `file_right`
+- `file_done` / `file_failed` — forwarded file-parse stages for pending uploads (same shape as file SSE)
+- `diff_started` — computation begin (after files are ready)
+- `diff_done` — job finished (`status=done`)
+- `diff_failed` — job failed (`error` message)
 
 ### Idempotency
 - Required for all POST requests
@@ -222,7 +233,7 @@ application/vnd...docx — file download
 "list"                 — list response wrapper
 "error"                — error response
 "chat.completion"      — chat response (planned)
-"diff"                 — diff result (planned)
+"diff"                 — Diff job (`similarity_percent`, `status`; full diff payload planned for report)
 ```
 
 ### NPA Hierarchy Levels (npa_level)
@@ -288,14 +299,18 @@ PATCH  /webhooks/:id              — update url, events, enabled toggle
 DELETE /webhooks/:id
 
 POST   /chat                      — RAG-based Q&A (stub)
+
+POST   /diffs                     — multipart (Stripe-style): (1) `left_file_id` + `right_file_id` (same document, both `status=done`); (2) one id + `file` (upload second side); (3) `file_left` + `file_right` (new document; optional Work fields `subtype`, `number`, …). `Accept: text/event-stream` — SSE until `diff_done` / `diff_failed` (file stages reuse `file_done` / `file_failed` on diff channel)
+GET    /diffs                     — list; `?document_id=`, `?file_id=` (left or right), `?status=`; `expand[]=document|left_file|right_file`
+GET    /diffs/:id                 — JSON metadata; `Accept: text/event-stream` for SSE on same channel
 ```
 
 ### Planned (not yet implemented)
 ```
-POST   /diffs                     — start diff of two files
-GET    /diffs/:id                 — status + SSE stream
-GET    /diffs/:id/report          — JSON / DOCX / AKN XML via Accept
+GET    /diffs/:id/report          — JSON / DOCX / AKN XML via Accept (export of diff result)
 ```
+
+**Note:** `POST /diffs` currently runs a **placeholder** computation (`similarity_percent=0`, empty `diff_data`); structural/word diff and report export are future work.
 
 ## File Processing Pipeline
 
@@ -457,6 +472,7 @@ Generated via `newID("prefix")` in `internal/api/id.go`:
 ```
 doc_a1b2c3d4e5f6    — documents
 file_a1b2c3d4e5f6   — files
+diff_a1b2c3d4e5f6   — diffs
 user_a1b2c3d4e5f6   — users
 sess_a1b2c3d4e5f6   — sessions
 pwdr_a1b2c3d4e5f6   — password resets
@@ -473,8 +489,9 @@ cd api
 # run server
 go run ./cmd/server/main.go
 
-# generate swagger docs
-nix run ..#swagen
+# generate swagger docs (flake at repo root)
+cd .. && nix run .#swagen
+# or from api/: nix run ..#swagen
 
 # build
 go build ./...

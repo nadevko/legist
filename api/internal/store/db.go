@@ -121,6 +121,26 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 );
 CREATE INDEX IF NOT EXISTS webhook_events_endpoint ON webhook_events(endpoint_id);
 CREATE INDEX IF NOT EXISTS webhook_events_status   ON webhook_events(status);
+
+CREATE TABLE IF NOT EXISTS diffs (
+	id            TEXT PRIMARY KEY,
+	user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
+
+	document_id   TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+	left_file_id  TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+	right_file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+
+	status        TEXT NOT NULL DEFAULT 'pending',
+
+	similarity_percent REAL,
+	diff_data          TEXT,
+
+	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS diffs_user_id      ON diffs(user_id);
+CREATE INDEX IF NOT EXISTS diffs_document_id  ON diffs(document_id);
+CREATE INDEX IF NOT EXISTS diffs_left_file_id ON diffs(left_file_id);
+CREATE INDEX IF NOT EXISTS diffs_right_file_id ON diffs(right_file_id);
 `
 
 func Open(path string) (*sqlx.DB, error) {
