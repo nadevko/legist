@@ -48,18 +48,28 @@ func (s *DocumentStore) GetByID(id string) (*Document, error) {
 	return &d, nil
 }
 
-func (s *DocumentStore) List(userID *string, p pagination.Params) ([]Document, error) {
+// DocumentListFilter narrows List by document owner (user_id).
+type DocumentListFilter struct {
+	UserID       *string
+	SelfOrPublic bool // when true and UserID set: user_id = ? OR user_id IS NULL
+}
+
+func (s *DocumentStore) List(filter DocumentListFilter, p pagination.Params) ([]Document, error) {
 	p.Normalize()
 
 	var q strings.Builder
 	var args []any
 
 	q.WriteString(`SELECT * FROM documents WHERE 1=1`)
-	if userID == nil {
+	switch {
+	case filter.SelfOrPublic && filter.UserID != nil:
+		q.WriteString(` AND (user_id = ? OR user_id IS NULL)`)
+		args = append(args, *filter.UserID)
+	case filter.UserID == nil:
 		q.WriteString(` AND user_id IS NULL`)
-	} else {
+	default:
 		q.WriteString(` AND user_id = ?`)
-		args = append(args, *userID)
+		args = append(args, *filter.UserID)
 	}
 	if p.StartingAfter != "" {
 		q.WriteString(` AND (created_at < (SELECT created_at FROM documents WHERE id = ?)

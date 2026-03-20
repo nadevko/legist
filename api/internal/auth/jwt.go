@@ -11,12 +11,18 @@ const accessTTL = 15 * time.Minute
 
 type Claims struct {
 	UserID string `json:"sub"`
+	Role   string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-func NewAccessToken(userID, secret string) (string, error) {
+// NewAccessToken issues a JWT with user id and role (use store.RoleUser / store.RoleAdmin).
+func NewAccessToken(userID, role, secret string) (string, error) {
+	if role == "" {
+		role = "user"
+	}
 	claims := Claims{
 		UserID: userID,
+		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -43,6 +49,9 @@ func ParseAccessToken(token, secret string) (*Claims, error) {
 	claims, ok := t.Claims.(*Claims)
 	if !ok || !t.Valid {
 		return nil, fmt.Errorf("invalid token claims")
+	}
+	if claims.Role == "" {
+		claims.Role = "user"
 	}
 	return claims, nil
 }

@@ -15,10 +15,12 @@ func NewFileStore(db *sqlx.DB) *FileStore { return &FileStore{db} }
 
 // FileFilter is used by List to narrow results.
 type FileFilter struct {
-	UserID     *string // nil = public (user_id IS NULL)
+	UserID     *string // nil = public-only when SelfOrPublic is false
 	DocumentID *string // nil = no filter
 	Status     string  // "" = no filter
 	MimeType   string  // "" = no filter
+	// SelfOrPublic when true and UserID non-nil: (user_id = ? OR user_id IS NULL)
+	SelfOrPublic bool
 }
 
 // FileMetaUpdate carries Expression-level fields written back after LLM.
@@ -65,9 +67,13 @@ func (s *FileStore) List(filter FileFilter, p pagination.Params) ([]File, error)
 
 	q.WriteString(`SELECT * FROM files WHERE 1=1`)
 
-	if filter.UserID == nil {
+	switch {
+	case filter.SelfOrPublic && filter.UserID != nil:
+		q.WriteString(` AND (user_id = ? OR user_id IS NULL)`)
+		args = append(args, *filter.UserID)
+	case filter.UserID == nil:
 		q.WriteString(` AND user_id IS NULL`)
-	} else {
+	default:
 		q.WriteString(` AND user_id = ?`)
 		args = append(args, *filter.UserID)
 	}

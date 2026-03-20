@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
 	id         TEXT PRIMARY KEY,
 	email      TEXT UNIQUE NOT NULL,
 	password   TEXT NOT NULL,
+	role       TEXT NOT NULL DEFAULT 'user',
 	created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -169,6 +170,7 @@ func Open(path string) (*sqlx.DB, error) {
 	// Ошибку игнорируем, т.к. если базы еще не было или колонка уже добавлена — запрос вернет ошибку,
 	// и это нормальное поведение.
 	_, _ = db.Exec(`ALTER TABLE files ADD COLUMN document_id TEXT REFERENCES documents(id) ON DELETE SET NULL;`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';`)
 
 	if _, err = db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)

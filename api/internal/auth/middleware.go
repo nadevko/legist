@@ -10,6 +10,7 @@ import (
 type contextKey string
 
 const UserIDKey contextKey = "userID"
+const RoleKey contextKey = "userRole"
 
 const Version = "v1-alpha"
 
@@ -39,6 +40,7 @@ func Middleware(secret string) echo.MiddlewareFunc {
 				})
 			}
 			c.Set(string(UserIDKey), claims.UserID)
+			c.Set(string(RoleKey), claims.Role)
 			return next(c)
 		}
 	}
@@ -48,4 +50,18 @@ func Middleware(secret string) echo.MiddlewareFunc {
 func UserID(c echo.Context) string {
 	v, _ := c.Get(string(UserIDKey)).(string)
 	return v
+}
+
+// Role returns the JWT role claim, defaulting to "user".
+func Role(c echo.Context) string {
+	v, _ := c.Get(string(RoleKey)).(string)
+	if v == "" {
+		return "user"
+	}
+	return v
+}
+
+// IsAdmin reports whether the caller has admin role.
+func IsAdmin(c echo.Context) bool {
+	return Role(c) == "admin"
 }

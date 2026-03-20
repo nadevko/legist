@@ -332,6 +332,9 @@ definitions:
       email:
         example: new@example.com
         type: string
+      role:
+        example: admin
+        type: string
     type: object
   api.userResponse:
     properties:
@@ -343,6 +346,8 @@ definitions:
         type: string
       object:
         description: '"user"'
+        type: string
+      role:
         type: string
     type: object
   api.webhookEndpointRequest:
@@ -415,10 +420,17 @@ info:
     Repeating a request with the same key returns the cached response.
     Keys expire after 24 hours. Reusing a key for a different endpoint returns 422.
 
+    ## Roles
+    Users have `role`: `user` or `admin` (in `users` table and JWT `role` claim).
+    Only `admin` may change another user's role via `PATCH /users/:id`.
+    In dev (`ENV=dev`), new registrations default to `admin`; otherwise default is `user`.
+
     ## Ownership and access control
     Resources belong to the authenticated user. Attempting to read or mutate
-    another user's resource returns 404 (not 403) to avoid leaking existence.
-    Public laws (`owner=public`) are readable by any authenticated user but cannot be mutated.
+    another user's private resource returns 404 (not 403) to avoid leaking existence.
+    Public resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.
+    List `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.
+    `owner=null` (admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
 
     ## Pagination
     List endpoints support cursor-based pagination via `starting_after` and `ending_before`.
@@ -706,7 +718,8 @@ paths:
   /documents:
     get:
       parameters:
-      - description: omit=current user, public=public laws
+      - description: 'omit: own only (user) or own+public (admin); null=public only
+          (admin); or your user id'
         in: query
         name: owner
         type: string
@@ -996,7 +1009,8 @@ paths:
   /files:
     get:
       parameters:
-      - description: omit=current user, public=laws only
+      - description: 'omit: own only (user) or own+public (admin); null=public only
+          (admin); or your user id'
         in: query
         name: owner
         type: string
@@ -1537,7 +1551,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: Fields to update
+      - description: Fields to update (email and/or role)
         in: body
         name: body
         required: true
@@ -1572,7 +1586,7 @@ paths:
             $ref: '#/definitions/api.apiErrorResponse'
       security:
       - BearerAuth: []
-      summary: Update user email
+      summary: Update user (email for self; role for admins)
       tags:
       - users
   /webhooks:

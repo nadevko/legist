@@ -34,7 +34,8 @@ legist/
 │       │   ├── health.go         # /health
 │       │   ├── doc.go            # swagger @annotations
 │       │   ├── types.go          # response types, error handler, pagination params
-│       │   ├── helpers.go        # bindListParams, listResult, ownerFilter, parseExpand
+│       │   ├── helpers.go        # bindListParams, listResult, parseExpand
+│       │   ├── owner_scope.go    # resolveOwnerListQuery for GET /files, GET /documents
 │       │   ├── expand.go         # expand[] middleware
 │       │   ├── idempotency.go    # Idempotency-Key middleware
 │       │   ├── writer.go         # bufferedWriter for middleware
@@ -180,9 +181,16 @@ If metadata fields are not supplied at upload time, `qwen2.5:3b` attempts extrac
 - `expand[]=resource` — expand related objects inline
 - `Idempotency-Key` header required for POST
 
+### Roles
+- `users.role`: `user` | `admin` (also JWT claim `role`)
+- Only `admin` may `PATCH /users/:id` with `{"role": ...}` for any user (including self)
+- Non-admins receive `400` if they try to set `role`
+- `ENV=dev`: new registrations default to `admin`; otherwise default `user`
+
 ### Ownership and Security
 - Resources return 404 (not 403) when they exist but belong to another user
-- Public documents (`user_id IS NULL`) are readable by all but not mutable
+- Public documents (`user_id IS NULL`) are readable by all authenticated users but not mutable
+- List `owner` on `GET /files` and `GET /documents`: omit → user sees only own; admin sees own + public (`user_id IS NULL`). `owner=null` (admin only) → public only. `owner=<your id>` → own only. Any other user id → `400`.
 - `DELETE /sessions/:id` uses `WHERE id=? AND user_id=?` — 0 rows = 404
 - `POST /tokens/password-reset` always returns 200 regardless of email existence (anti-enumeration)
 - `POST /users` returns 409 only on UNIQUE violation, other errors return 500
@@ -209,6 +217,7 @@ application/vnd...docx — file download
 
 ### Database
 - SQLite, WAL mode, `foreign_keys=ON`, `busy_timeout=5000`
+- `users.role` — `user` | `admin` (default `user`; migrated via `ALTER TABLE`)
 - 3NF — no derived fields, no JSON columns (webhook events use separate table)
 - Public laws: `files.user_id IS NULL`, `documents.user_id IS NULL`
 - Cursor pagination: composite `(created_at, id)` cursor in all list queries
@@ -224,7 +233,7 @@ application/vnd...docx — file download
 
 ### object Field Values
 ```
-"user"                 — User
+"user"                 — User (`role`: user|admin)
 "session"              — Session
 "file"                 — File
 "document"             — Document (AKN Work-level entity)
@@ -271,14 +280,14 @@ GET    /me                        — alias for GET /users/:currentUserID
 PATCH  /me
 DELETE /me
 
-GET    /users/:id                 — own profile only (404 for others)
-PATCH  /users/:id                 — own profile only
+GET    /users/:id                 — self, or any id if admin
+PATCH  /users/:id                 — self: email (and role if admin); admin may PATCH another user with `role` only
 DELETE /users/:id                 — own profile only
 
 GET    /sessions                  — list active sessions
 DELETE /sessions/:id              — logout (404 if not found or not owner)
 
-GET    /documents                 — list own documents; ?owner=public for public laws
+GET    /documents                 — list by `owner` (see Roles / Stripe-like owner above)
 POST   /documents                 — create document manually (409 on duplicate identity)
 GET    /documents/:id
 PATCH  /documents/:id             — update Work-level fields
@@ -287,7 +296,7 @@ DELETE /documents/:id
 GET    /documents/:id/files       — list versions (canonical); alias: GET /files?document_id=:id; supports ?type=pdf|docx
 POST   /documents/:id/files       — add version (canonical); alias: POST /files with document_id form field
 
-GET    /files                     — own files; ?document_id= forwards to /documents/:id/files; supports ?type=pdf|docx
+GET    /files                     — list by `owner` (see Roles); ?document_id= forwards to /documents/:id/files; ?type=pdf|docx
 POST   /files                     — upload + create new Document (409 on duplicate identity)
 GET    /files/:id                 — metadata / parsed artifact (`Accept: application/legistoso`) / download / SSE (via Accept)
 PATCH  /files/:id                 — update Expression-level fields (version_date, language, pub_*, etc.)

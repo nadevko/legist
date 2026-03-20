@@ -11,8 +11,11 @@ type UserStore struct{ db *sqlx.DB }
 func NewUserStore(db *sqlx.DB) *UserStore { return &UserStore{db} }
 
 func (s *UserStore) Create(u *User) error {
+	if u.Role == "" {
+		u.Role = RoleUser
+	}
 	_, err := s.db.NamedExec(
-		`INSERT INTO users (id, email, password) VALUES (:id, :email, :password)`, u)
+		`INSERT INTO users (id, email, password, role) VALUES (:id, :email, :password, :role)`, u)
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
@@ -47,6 +50,15 @@ func (s *UserStore) UpdatePassword(id, hash string) error {
 	_, err := s.db.Exec(`UPDATE users SET password = ? WHERE id = ?`, hash, id)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
+// UpdateRole sets users.role (admin-only at API layer).
+func (s *UserStore) UpdateRole(id, role string) error {
+	_, err := s.db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, id)
+	if err != nil {
+		return fmt.Errorf("update role: %w", err)
 	}
 	return nil
 }

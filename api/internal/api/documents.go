@@ -69,7 +69,7 @@ func (s *Server) handleCreateDocument(c echo.Context) error {
 // @Tags        documents
 // @Security    BearerAuth
 // @Produce     json
-// @Param       owner          query string false "omit=current user, public=public laws"
+// @Param       owner          query string false "omit: own only (user) or own+public (admin); null=public only (admin); or your user id"
 // @Param       limit          query int    false "Limit"
 // @Param       starting_after query string false "Cursor"
 // @Param       ending_before  query string false "Cursor"
@@ -81,18 +81,21 @@ func (s *Server) handleListDocuments(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var userID *string
-	switch c.QueryParam("owner") {
-	case "public":
-		// userID stays nil → public laws
-	case "":
-		uid := auth.UserID(c)
-		userID = &uid
-	default:
-		return errorf(http.StatusBadRequest, "invalid_parameter_value",
-			"owner must be 'public'", "owner")
+	kind, uid, err := resolveOwnerListQuery(c)
+	if err != nil {
+		return err
 	}
-	docs, err := s.documents.List(userID, p.toStore())
+	var docFilter store.DocumentListFilter
+	switch kind {
+	case ownerListSelfOnly:
+		docFilter.UserID = &uid
+	case ownerListPublicOnly:
+		docFilter.UserID = nil
+	case ownerListSelfAndPublic:
+		docFilter.UserID = &uid
+		docFilter.SelfOrPublic = true
+	}
+	docs, err := s.documents.List(docFilter, p.toStore())
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}

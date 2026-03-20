@@ -46,7 +46,7 @@ type filePatchRequest struct {
 // @Tags        files
 // @Security    BearerAuth
 // @Produce     json
-// @Param       owner          query  string   false "omit=current user, public=laws only"
+// @Param       owner          query  string   false "omit: own only (user) or own+public (admin); null=public only (admin); or your user id"
 // @Param       document_id    query  string   false "Forward to /documents/:id/files"
 // @Param       type           query  string   false "pdf|docx"
 // @Param       status         query  string   false "pending|processing|done|failed"
@@ -110,15 +110,18 @@ func (s *Server) listFilesCore(c echo.Context, documentID *string) error {
 		filter.MimeType = mime
 	}
 
-	switch c.QueryParam("owner") {
-	case "public":
-		// UserID stays nil → WHERE user_id IS NULL
-	case "":
-		uid := auth.UserID(c)
+	kind, uid, err := resolveOwnerListQuery(c)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case ownerListSelfOnly:
 		filter.UserID = &uid
-	default:
-		return errorf(http.StatusBadRequest, "invalid_parameter_value",
-			"owner must be 'public'", "owner")
+	case ownerListPublicOnly:
+		filter.UserID = nil
+	case ownerListSelfAndPublic:
+		filter.UserID = &uid
+		filter.SelfOrPublic = true
 	}
 
 	if documentID != nil {

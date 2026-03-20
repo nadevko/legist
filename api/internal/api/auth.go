@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -32,7 +33,8 @@ type refreshRequest struct {
 }
 
 type updateUserRequest struct {
-	Email string `json:"email" example:"new@example.com"`
+	Email *string `json:"email,omitempty" example:"new@example.com"`
+	Role  *string `json:"role,omitempty"  example:"admin"`
 }
 
 // handleRegister godoc
@@ -63,7 +65,11 @@ func (s *Server) handleRegister(c echo.Context) error {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
-	u := &store.User{ID: newID("user"), Email: body.Email, Password: hash}
+	role := store.RoleUser
+	if s.cfg.Dev {
+		role = store.RoleAdmin
+	}
+	u := &store.User{ID: newID("user"), Email: body.Email, Password: hash, Role: role}
 	if err = s.users.Create(u); err != nil {
 		if store.IsUniqueViolation(err) {
 			return errorf(http.StatusConflict, "email_taken", "email already taken", "email")
@@ -71,12 +77,7 @@ func (s *Server) handleRegister(c echo.Context) error {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 
-	return c.JSON(http.StatusCreated, userResponse{
-		ID:      u.ID,
-		Object:  "user",
-		Email:   u.Email,
-		Created: toUnix(u.CreatedAt),
-	})
+	return c.JSON(http.StatusCreated, toUserResponse(*u))
 }
 
 // handleLogin godoc
@@ -100,7 +101,7 @@ func (s *Server) handleLogin(c echo.Context) error {
 		return errorf(http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 	}
 
-	accessToken, err := auth.NewAccessToken(u.ID, s.cfg.JWTSecret)
+	accessToken, err := auth.NewAccessToken(u.ID, u.Role, s.cfg.JWTSecret)
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
@@ -150,7 +151,16 @@ func (s *Server) handleRefresh(c echo.Context) error {
 			"invalid or expired refresh token", "refresh_token")
 	}
 
-	accessToken, err := auth.NewAccessToken(sess.UserID, s.cfg.JWTSecret)
+	u, err := s.users.GetByID(sess.UserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errorf(http.StatusUnauthorized, "invalid_token",
+			"invalid or expired refresh token", "refresh_token")
+	}
+	if err != nil {
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
+	}
+
+	accessToken, err := auth.NewAccessToken(u.ID, u.Role, s.cfg.JWTSecret)
 	if err != nil {
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
@@ -220,9 +230,8 @@ func (s *Server) handleListSessions(c echo.Context) error {
 // @Router      /users/{id} [get]
 func (s *Server) handleGetUser(c echo.Context) error {
 	id := resolveUserID(c)
-	// Users can only read their own profile.
-	if err := requireSelf(c, id); err != nil {
-		return err
+	if auth.UserID(c) != id && !auth.IsAdmin(c) {
+		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+id)
 	}
 	u, err := s.users.GetByID(id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -235,11 +244,11 @@ func (s *Server) handleGetUser(c echo.Context) error {
 }
 
 // handleUpdateUser godoc
-// @Summary     Update user email
+// @Summary     Update user (email for self; role for admins)
 // @Tags        users
 // @Security    BearerAuth
 // @Param       id              path   string            true  "User ID or 'me'"
-// @Param       body            body   updateUserRequest true  "Fields to update"
+// @Param       body            body   updateUserRequest true  "Fields to update (email and/or role)"
 // @Param       Idempotency-Key header string            false "Idempotency key"
 // @Accept      json
 // @Produce     json
@@ -250,26 +259,74 @@ func (s *Server) handleGetUser(c echo.Context) error {
 // @Failure     409 {object} apiErrorResponse
 // @Router      /users/{id} [patch]
 func (s *Server) handleUpdateUser(c echo.Context) error {
-	id := resolveUserID(c)
-	if err := requireSelf(c, id); err != nil {
-		return err
+	targetID := resolveUserID(c)
+	caller := auth.UserID(c)
+	isAdmin := auth.IsAdmin(c)
+
+	if targetID != caller && !isAdmin {
+		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+targetID)
 	}
 
 	var body updateUserRequest
 	if err := c.Bind(&body); err != nil {
 		return errorf(http.StatusBadRequest, "invalid_request", "invalid body")
 	}
-	if body.Email == "" {
-		return errorf(http.StatusBadRequest, "parameter_missing", "email is required", "email")
+	if body.Email == nil && body.Role == nil {
+		return errorf(http.StatusBadRequest, "parameter_missing",
+			"at least one of email or role is required")
 	}
 
-	if err := s.users.UpdateEmail(id, body.Email); err != nil {
-		return errorf(http.StatusConflict, "email_taken", "email already taken", "email")
+	if body.Role != nil && !isAdmin {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value",
+			"only admins may change role", "role")
 	}
 
-	u, err := s.users.GetByID(id)
+	if body.Email != nil && targetID != caller {
+		return errorf(http.StatusBadRequest, "invalid_request",
+			"cannot change another user's email", "email")
+	}
+
+	if targetID != caller && isAdmin {
+		if body.Email != nil {
+			return errorf(http.StatusBadRequest, "invalid_request",
+				"cannot change another user's email", "email")
+		}
+		if body.Role == nil {
+			return errorf(http.StatusBadRequest, "parameter_missing",
+				"role is required when updating another user", "role")
+		}
+	}
+
+	if body.Email != nil {
+		em := strings.TrimSpace(*body.Email)
+		if em == "" {
+			return errorf(http.StatusBadRequest, "parameter_missing", "email is required", "email")
+		}
+		if err := s.users.UpdateEmail(targetID, em); err != nil {
+			if store.IsUniqueViolation(err) {
+				return errorf(http.StatusConflict, "email_taken", "email already taken", "email")
+			}
+			return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		}
+	}
+
+	if body.Role != nil {
+		r := strings.TrimSpace(*body.Role)
+		if r != store.RoleUser && r != store.RoleAdmin {
+			return errorf(http.StatusBadRequest, "invalid_parameter_value",
+				"role must be 'user' or 'admin'", "role")
+		}
+		if err := s.users.UpdateRole(targetID, r); err != nil {
+			return errorf(http.StatusInternalServerError, "server_error", "internal error")
+		}
+	}
+
+	u, err := s.users.GetByID(targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+targetID)
+	}
 	if err != nil {
-		return errorf(http.StatusNotFound, "resource_missing", "no such user: "+id)
+		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
 	return c.JSON(http.StatusOK, toUserResponse(*u))
 }
@@ -317,10 +374,15 @@ func requireSelf(c echo.Context, targetID string) error {
 }
 
 func toUserResponse(u store.User) userResponse {
+	role := u.Role
+	if role == "" {
+		role = store.RoleUser
+	}
 	return userResponse{
 		ID:      u.ID,
 		Object:  "user",
 		Email:   u.Email,
+		Role:    role,
 		Created: toUnix(u.CreatedAt),
 	}
 }

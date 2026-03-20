@@ -16,10 +16,17 @@
 // @description     Repeating a request with the same key returns the cached response.
 // @description     Keys expire after 24 hours. Reusing a key for a different endpoint returns 422.
 // @description
+// @description     ## Roles
+// @description     Users have `role`: `user` or `admin` (in `users` table and JWT `role` claim).
+// @description     Only `admin` may change another user's role via `PATCH /users/:id`.
+// @description     In dev (`ENV=dev`), new registrations default to `admin`; otherwise default is `user`.
+// @description
 // @description     ## Ownership and access control
 // @description     Resources belong to the authenticated user. Attempting to read or mutate
-// @description     another user's resource returns 404 (not 403) to avoid leaking existence.
-// @description     Public laws (`owner=public`) are readable by any authenticated user but cannot be mutated.
+// @description     another user's private resource returns 404 (not 403) to avoid leaking existence.
+// @description     Public resources (`user_id IS NULL`) are readable by any authenticated user but cannot be mutated.
+// @description     List `owner` query (Stripe-like): omit → non-admin sees only own rows; admin sees own + public.
+// @description     `owner=null` (admin only) → public rows only. `owner=<your user id>` → own rows only. Other ids are rejected.
 // @description
 // @description     ## Pagination
 // @description     List endpoints support cursor-based pagination via `starting_after` and `ending_before`.

@@ -153,6 +153,7 @@ type userResponse struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"` // "user"
 	Email   string `json:"email"`
+	Role    string `json:"role"`
 	Created int64  `json:"created"`
 }
 

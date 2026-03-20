@@ -31,10 +31,17 @@ func IsNotFound(err error) bool {
 
 // --- models ---
 
+// User roles (stored in users.role, echoed in JWT).
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
+
 type User struct {
 	ID        string    `db:"id"`
 	Email     string    `db:"email"`
 	Password  string    `db:"password"`
+	Role      string    `db:"role"`
 	CreatedAt time.Time `db:"created_at"`
 }
 
