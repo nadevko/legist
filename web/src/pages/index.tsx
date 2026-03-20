@@ -301,7 +301,7 @@ export function ActDetailPage() {
 export function HomePage() {
   const navigate = useNavigate()
   const showToast = useUIStore(s => s.showToast)
-  const { oldFile, newFile, dzOldOver, dzNewOver, loading, setDzOldOver, setDzNewOver, onDrop, onSelect, removeOld, removeNew } = useFileUpload()
+  const { oldFile, newFile, dzOldOver, dzNewOver, loadingOld, loadingNew, setDzOldOver, setDzNewOver, onDrop, onSelect, removeOld, removeNew } = useFileUpload()
   const progress = useCompareProgress()
   const [recent, setRecent] = useState<any[]>([])
   const fiOldRef = useRef<HTMLInputElement>(null)
