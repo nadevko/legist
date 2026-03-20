@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
+	"gonum.org/v1/gonum/floats"
 
 	"github.com/nadevko/legist/internal/auth"
 	embedder "github.com/nadevko/legist/internal/embed"
@@ -22,6 +24,8 @@ import (
 	"github.com/nadevko/legist/internal/upload"
 	"github.com/nadevko/legist/internal/webhook"
 )
+
+var requestValidator = validator.New()
 
 func toDiffResponse(d store.Diff) diffResponse {
 	return diffResponse{
@@ -76,7 +80,7 @@ func (s *Server) fileParseSucceeded(fileID string) bool {
 
 // runDiffPendingFiles runs the file pipeline for each pending file in order, then runDiffComputation.
 // preamble runs once before the first file (e.g. document_* SSE for two-file upload).
-func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *processFileChannel, preamble func(), files []*store.File, threshold float64) {
+func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *processFileChannel, preamble func(), files []*store.File, lowThreshold float64, highThreshold float64) {
 	if preamble != nil {
 		preamble()
 	}
@@ -94,7 +98,7 @@ func (s *Server) runDiffPendingFiles(diffID string, doc *store.Document, pch *pr
 			return
 		}
 	}
-	s.runDiffComputation(diffID, threshold)
+	s.runDiffComputation(diffID, lowThreshold, highThreshold)
 }
 
 func (s *Server) respondDiffCreated(c echo.Context, d *store.Diff) error {
@@ -105,7 +109,7 @@ func (s *Server) respondDiffCreated(c echo.Context, d *store.Diff) error {
 }
 
 // runDiffComputation performs structural diff (placeholder) and marks the diff done or failed.
-func (s *Server) runDiffComputation(diffID string, threshold float64) {
+func (s *Server) runDiffComputation(diffID string, lowThreshold float64, highThreshold float64) {
 	if err := s.diffs.UpdateStatus(diffID, "processing"); err != nil {
 		return
 	}
@@ -137,22 +141,40 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 	}
 
 	// Clamp to sane range.
-	if threshold < 0 {
-		threshold = 0
+	if lowThreshold < 0 {
+		lowThreshold = 0
 	}
-	if threshold > 1 {
-		threshold = 1
+	if lowThreshold > 1 {
+		lowThreshold = 1
+	}
+	if highThreshold < 0 {
+		highThreshold = 0
+	}
+	if highThreshold > 1 {
+		highThreshold = 1
+	}
+	// Ensure low <= high, otherwise swap to preserve semantics.
+	if lowThreshold > highThreshold {
+		lowThreshold, highThreshold = highThreshold, lowThreshold
 	}
 
 	leftPath := filepath.Join(s.cfg.DataPath, "lessed", d.LeftFileID)
 	rightPath := filepath.Join(s.cfg.DataPath, "lessed", d.RightFileID)
 
 	embedCfg := embedder.Config{
-		OllamaBaseURL:    s.cfg.OllamaBaseURL,
-		Model:            s.cfg.EmbedModel,
-		BatchSize:        s.cfg.EmbedBatchSize,
-		ProgressInterval: time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
-		HTTPTimeout:      time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
+		OllamaBaseURL:            s.cfg.OllamaBaseURL,
+		Model:                    s.cfg.EmbedModel,
+		BatchSize:                s.cfg.EmbedBatchSize,
+		ShortChunkPrefixMaxChars: s.cfg.EmbedShortChunkPrefixMaxChars,
+		UseWeightPrefix:          s.cfg.EmbedUseWeightPrefix,
+		WeightCritical:           s.cfg.WeightCritical,
+		WeightMain:               s.cfg.WeightMain,
+		WeightStandard:           s.cfg.WeightStandard,
+		WeightTechnical:          s.cfg.WeightTechnical,
+		WeightMaxCap:             s.cfg.WeightMaxCap,
+		EmbeddingContextHash:     s.cfg.EmbeddingContextHash,
+		ProgressInterval:         time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
+		HTTPTimeout:              time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
 	}
 
 	// Ensure embeddings are present (skip when already up-to-date).
@@ -188,9 +210,21 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 
 	leftEmb := leftPF.ChunkEmbeddings
 	rightEmb := rightPF.ChunkEmbeddings
+	leftContents := leftPF.ChunkContent
+	rightContents := rightPF.ChunkContent
+	leftWeights := parser.FlattenChunkWeights(leftPF.Sections)
+	rightWeights := parser.FlattenChunkWeights(rightPF.Sections)
 
 	NLeft := len(leftEmb)
 	NRight := len(rightEmb)
+	if len(leftContents) != NLeft || len(rightContents) != NRight {
+		fail("chunk content/embedding length mismatch", fmt.Errorf("left=%d/%d right=%d/%d", len(leftContents), NLeft, len(rightContents), NRight))
+		return
+	}
+	if len(leftWeights) != NLeft || len(rightWeights) != NRight {
+		fail("chunk weight/embedding length mismatch", fmt.Errorf("left=%d/%d right=%d/%d", len(leftWeights), NLeft, len(rightWeights), NRight))
+		return
+	}
 
 	// Validate embeddings arrays are non-empty/consistent.
 	if NLeft == 0 || NRight == 0 {
@@ -199,14 +233,16 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 		zeroRight := make([]*int, NRight) // empty slices
 		payload := struct {
 			Params struct {
-				Threshold float64 `json:"threshold"`
+				LowThreshold  float64 `json:"low_threshold"`
+				HighThreshold float64 `json:"high_threshold"`
 			} `json:"params"`
 			MatchedPairsCount int  `json:"matched_pairs_count"`
 			LeftMatches        []*int `json:"left_matches"`
 			RightMatches       []*int `json:"right_matches"`
 			SimilarityMatrix   any   `json:"similarity_matrix"`
 		}{}
-		payload.Params.Threshold = threshold
+		payload.Params.LowThreshold = lowThreshold
+		payload.Params.HighThreshold = highThreshold
 		payload.LeftMatches = zeroLeft
 		payload.RightMatches = zeroRight
 		payload.SimilarityMatrix = nil
@@ -252,11 +288,7 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 			fail("left embeddings dimension mismatch", fmt.Errorf("idx=%d expected=%d got=%d", i, lDim, len(leftEmb[i])))
 			return
 		}
-		var sum float64
-		for _, x := range leftEmb[i] {
-			sum += x * x
-		}
-		n := math.Sqrt(sum)
+		n := floats.Norm(leftEmb[i], 2)
 		if n == 0 {
 			fail("left embedding norm is zero", nil)
 			return
@@ -269,16 +301,23 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 			fail("right embeddings dimension mismatch", fmt.Errorf("idx=%d expected=%d got=%d", j, rDim, len(rightEmb[j])))
 			return
 		}
-		var sum float64
-		for _, x := range rightEmb[j] {
-			sum += x * x
-		}
-		n := math.Sqrt(sum)
+		n := floats.Norm(rightEmb[j], 2)
 		if n == 0 {
 			fail("right embedding norm is zero", nil)
 			return
 		}
 		normsR[j] = n
+	}
+
+	// Regex rules are only used for matches with sim in the risk zone: low <= sim < high.
+	var regexRules []DiffMatchRegexRule
+	if s.cfg.DiffMatchRegexFile != "" && highThreshold > lowThreshold {
+		rules, err := loadDiffMatchRegexRules(s.cfg.DiffMatchRegexFile)
+		if err != nil {
+			fail("failed to load diff match regex rules", err)
+			return
+		}
+		regexRules = rules
 	}
 
 	candidates := make([]edge, 0)
@@ -292,12 +331,9 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 		ni := normsL[i]
 		for j := 0; j < NRight; j++ {
 			rj := rightEmb[j]
-			dot := 0.0
-			for k := 0; k < lDim; k++ {
-				dot += li[k] * rj[k]
-			}
+			dot := floats.Dot(li, rj)
 			sim := dot / (ni * normsR[j])
-			if sim >= threshold {
+			if sim >= lowThreshold {
 				candidates = append(candidates, edge{i: i, j: j, sim: sim})
 			}
 		}
@@ -324,13 +360,14 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 	rightUsed := make([]bool, NRight)
 	leftMatches := make([]*int, NLeft)
 	rightMatches := make([]*int, NRight)
+	leftMatchSims := make([]float64, NLeft)
 	matchedPairs := 0
 
 	for _, e := range candidates {
 		if leftUsed[e.i] || rightUsed[e.j] {
 			continue
 		}
-		if e.sim < threshold {
+		if e.sim < lowThreshold {
 			continue
 		}
 		leftUsed[e.i] = true
@@ -339,21 +376,71 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 		iv := e.i
 		leftMatches[e.i] = &jv
 		rightMatches[e.j] = &iv
+		leftMatchSims[e.i] = e.sim
 		matchedPairs++
 	}
 
-	denom := NLeft
-	if NRight > denom {
-		denom = NRight
+	// Risk-zone filtering: for matches with lowThreshold <= sim < highThreshold,
+	// run word-level diff + regex on changed fragments.
+	if highThreshold > lowThreshold && len(regexRules) > 0 {
+		for i := 0; i < NLeft; i++ {
+			if leftMatches[i] == nil {
+				continue
+			}
+			if leftMatchSims[i] >= highThreshold {
+				continue
+			}
+			j := *leftMatches[i]
+			if !diffMatchRegexMatchesDelta(leftContents[i], rightContents[j], regexRules) {
+				leftMatches[i] = nil
+				rightMatches[j] = nil
+			}
+		}
+	}
+
+	// Recount matched pairs after risk-zone filtering.
+	matchedPairs = 0
+	for i := 0; i < NLeft; i++ {
+		if leftMatches[i] != nil {
+			matchedPairs++
+		}
+	}
+
+	sumWeightsLeft := 0.0
+	for _, w := range leftWeights {
+		if w <= 0 {
+			w = 1.0
+		}
+		sumWeightsLeft += w
+	}
+	sumWeightsRight := 0.0
+	for _, w := range rightWeights {
+		if w <= 0 {
+			w = 1.0
+		}
+		sumWeightsRight += w
+	}
+	denom := math.Max(sumWeightsLeft, sumWeightsRight)
+	weightedNumerator := 0.0
+	for i := 0; i < NLeft; i++ {
+		if leftMatches[i] == nil {
+			continue
+		}
+		w := leftWeights[i]
+		if w <= 0 {
+			w = 1.0
+		}
+		weightedNumerator += leftMatchSims[i] * w
 	}
 	simPercent := 0.0
 	if denom > 0 {
-		simPercent = float64(matchedPairs) * 100.0 / float64(denom)
+		simPercent = (weightedNumerator / denom) * 100.0
 	}
 
 	type diffMatchingData struct {
 		Params struct {
-			Threshold float64 `json:"threshold"`
+			LowThreshold  float64 `json:"low_threshold"`
+			HighThreshold float64 `json:"high_threshold"`
 		} `json:"params"`
 		MatchedPairsCount int    `json:"matched_pairs_count"`
 		LeftMatches        []*int `json:"left_matches"`
@@ -362,7 +449,8 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 	}
 
 	var payload diffMatchingData
-	payload.Params.Threshold = threshold
+	payload.Params.LowThreshold = lowThreshold
+	payload.Params.HighThreshold = highThreshold
 	payload.MatchedPairsCount = matchedPairs
 	payload.LeftMatches = leftMatches
 	payload.RightMatches = rightMatches
@@ -412,7 +500,8 @@ func (s *Server) runDiffComputation(diffID string, threshold float64) {
 // @Param       date            formData string false "Work metadata"
 // @Param       country         formData string false "Work metadata"
 // @Param       name            formData string false "Work metadata"
-	// @Param       match_threshold formData number false "Greedy chunk matching threshold for diff (admin only; default from DIFF_MATCH_THRESHOLD)"
+	// @Param       match_threshold_low formData number false "Hard threshold for diff chunk matching (admin only; default from DIFF_MATCH_THRESHOLD_LOW)"
+	// @Param       match_threshold_high formData number false "Soft threshold for diff chunk matching (admin only; default from DIFF_MATCH_THRESHOLD_HIGH)"
 // @Param       Accept          header   string false "application/json | text/event-stream"
 // @Param       Idempotency-Key header   string true  "Idempotency key"
 // @Success     201 {object} diffResponse
@@ -429,13 +518,25 @@ func (s *Server) handleCreateDiff(c echo.Context) error {
 		return badUpload(err)
 	}
 
-	threshold := s.cfg.DiffMatchThreshold
-	if req.MatchThreshold != nil {
+	lowThreshold := s.cfg.DiffMatchLowThreshold
+	highThreshold := s.cfg.DiffMatchHighThreshold
+	if req.MatchThresholdLow != nil || req.MatchThresholdHigh != nil {
 		if !auth.IsAdmin(c) {
 			return errorf(http.StatusBadRequest, "invalid_parameter_value",
-				"only admins may set match_threshold", "match_threshold")
+				"only admins may set match_threshold_low/match_threshold_high", "")
 		}
-		threshold = *req.MatchThreshold
+		if req.MatchThresholdLow != nil {
+			lowThreshold = *req.MatchThresholdLow
+		}
+		if req.MatchThresholdHigh != nil {
+			highThreshold = *req.MatchThresholdHigh
+		}
+	}
+	if err := requestValidator.Var(lowThreshold, "gte=0,lte=1"); err != nil {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value", "match_threshold_low must be within [0,1]", "match_threshold_low")
+	}
+	if err := requestValidator.Var(highThreshold, "gte=0,lte=1"); err != nil {
+		return errorf(http.StatusBadRequest, "invalid_parameter_value", "match_threshold_high must be within [0,1]", "match_threshold_high")
 	}
 
 	hasFL := upload.HasFile(mf, "file_left")
@@ -451,7 +552,7 @@ func (s *Server) handleCreateDiff(c echo.Context) error {
 	rightID := strings.TrimSpace(c.FormValue("right_file_id"))
 
 	if hasFL && hasFR {
-		return s.createDiffFromTwoFiles(c, req, threshold)
+		return s.createDiffFromTwoFiles(c, req, lowThreshold, highThreshold)
 	}
 	if hasFile {
 		if leftID != "" && rightID != "" {
@@ -462,16 +563,16 @@ func (s *Server) handleCreateDiff(c echo.Context) error {
 			return errorf(http.StatusBadRequest, "parameter_missing",
 				"left_file_id or right_file_id is required with file", "left_file_id")
 		}
-		return s.createDiffFromFileAndID(c, req, leftID, rightID, threshold)
+		return s.createDiffFromFileAndID(c, req, leftID, rightID, lowThreshold, highThreshold)
 	}
 	if leftID != "" && rightID != "" {
-		return s.createDiffFromIDs(c, req, leftID, rightID, threshold)
+		return s.createDiffFromIDs(c, req, leftID, rightID, lowThreshold, highThreshold)
 	}
 	return errorf(http.StatusBadRequest, "invalid_request",
 		"send left_file_id+right_file_id, or one id + file, or file_left+file_right")
 }
 
-func (s *Server) createDiffFromIDs(c echo.Context, req upload.FormData, leftID, rightID string, threshold float64) error {
+func (s *Server) createDiffFromIDs(c echo.Context, req upload.FormData, leftID, rightID string, lowThreshold float64, highThreshold float64) error {
 	if leftID == rightID {
 		return errorf(http.StatusBadRequest, "invalid_request",
 			"left_file_id and right_file_id must differ", "right_file_id")
@@ -521,12 +622,12 @@ func (s *Server) createDiffFromIDs(c echo.Context, req upload.FormData, leftID, 
 	}
 	s.dispatcher.Dispatch(webhook.EventDiffCreated, toDiffResponse(*d))
 
-	go s.runDiffComputation(d.ID, threshold)
+	go s.runDiffComputation(d.ID, lowThreshold, highThreshold)
 
 	return s.respondDiffCreated(c, d)
 }
 
-func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, leftID, rightID string, threshold float64) error {
+func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, leftID, rightID string, lowThreshold float64, highThreshold float64) error {
 	var existingID string
 	var newIsRight bool
 	switch {
@@ -602,13 +703,13 @@ func (s *Server) createDiffFromFileAndID(c echo.Context, req upload.FormData, le
 
 	pch := diffProcessingChannel(d.ID)
 	go func(newFile *store.File, doc *store.Document, diffID string) {
-		s.runDiffPendingFiles(diffID, doc, pch, nil, []*store.File{newFile}, threshold)
+		s.runDiffPendingFiles(diffID, doc, pch, nil, []*store.File{newFile}, lowThreshold, highThreshold)
 	}(newF, doc, d.ID)
 
 	return s.respondDiffCreated(c, d)
 }
 
-func (s *Server) createDiffFromTwoFiles(c echo.Context, req upload.FormData, threshold float64) error {
+func (s *Server) createDiffFromTwoFiles(c echo.Context, req upload.FormData, lowThreshold float64, highThreshold float64) error {
 	uid := auth.UserID(c)
 
 	fLeft, doc, err := s.saveFormFile(c, "file_left", nil, req)
@@ -647,7 +748,7 @@ func (s *Server) createDiffFromTwoFiles(c echo.Context, req upload.FormData, thr
 		s.publishDiffEvent(diffID, "document_will_be_created", map[string]any{"diff_id": diffID})
 		s.publishDiffEvent(diffID, "document_created", map[string]any{"diff_id": diffID, "document_id": doc.ID})
 	}
-	go s.runDiffPendingFiles(diffID, doc, pch, preamble, []*store.File{fLeft, fRight}, threshold)
+	go s.runDiffPendingFiles(diffID, doc, pch, preamble, []*store.File{fLeft, fRight}, lowThreshold, highThreshold)
 
 	return s.respondDiffCreated(c, d)
 }

@@ -454,7 +454,14 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 			HTTPTimeout:       time.Duration(s.cfg.MetadataHTTPTimeoutMS) * time.Millisecond,
 			MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
 		},
-		WindowSize:    s.cfg.MetadataWindowSize,
+		WindowSize: s.cfg.MetadataWindowSize,
+		WeightConfig: parser.ChunkWeightConfig{
+			Critical:  s.cfg.WeightCritical,
+			Main:      s.cfg.WeightMain,
+			Standard:  s.cfg.WeightStandard,
+			Technical: s.cfg.WeightTechnical,
+			MaxCap:    s.cfg.WeightMaxCap,
+		},
 		ParserVersion: "1",
 	}
 
@@ -473,11 +480,19 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 	}
 
 	embedCfg := embedder.Config{
-		OllamaBaseURL:    s.cfg.OllamaBaseURL,
-		Model:            s.cfg.EmbedModel,
-		BatchSize:        s.cfg.EmbedBatchSize,
-		ProgressInterval: time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
-		HTTPTimeout:      time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
+		OllamaBaseURL:             s.cfg.OllamaBaseURL,
+		Model:                     s.cfg.EmbedModel,
+		BatchSize:                 s.cfg.EmbedBatchSize,
+		ShortChunkPrefixMaxChars:  s.cfg.EmbedShortChunkPrefixMaxChars,
+		UseWeightPrefix:           s.cfg.EmbedUseWeightPrefix,
+		WeightCritical:            s.cfg.WeightCritical,
+		WeightMain:                s.cfg.WeightMain,
+		WeightStandard:            s.cfg.WeightStandard,
+		WeightTechnical:           s.cfg.WeightTechnical,
+		WeightMaxCap:              s.cfg.WeightMaxCap,
+		EmbeddingContextHash:      s.cfg.EmbeddingContextHash,
+		ProgressInterval:          time.Duration(s.cfg.EmbedProgressIntervalMS) * time.Millisecond,
+		HTTPTimeout:               time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond,
 	}
 	if err := embedder.LegistEmbedIfNeeded(ctx, res.ParsedFilePath, embedCfg, func(p parser.ParseProgress) {
 		if p.Stage == parser.StageDone || p.Stage == parser.StageFailed {

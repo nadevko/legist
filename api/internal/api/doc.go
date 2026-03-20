@@ -39,8 +39,9 @@
 // @description     Use the `Accept` header to control response format:
 // @description     - `application/json` — JSON metadata (default)
 // @description     - `application/lessed` — parsed document structure and AKN metadata (when file status is `done`);
-// @description       `sections[].chunks[]` use `content` (full chunk text, embedded as a whole), `plain_start` / `plain_end` (rune offsets into canonical plain text);
-// @description       optional `chunk_embeddings[][]` (one vector per chunk in the same DFS order as `content`) and `embedding_model` when embedding completed
+// @description       `chunk_content[]` stores chunk texts in DFS order; `sections[].chunks[]` keep positional metadata (`plain_start` / `plain_end`, section ids);
+// @description       optional `chunk_embeddings[][]` (one vector per chunk in the same DFS order as `chunk_content`) and `embedding_model` when embedding completed;
+// @description       each positional chunk metadata entry may contain `weight` used for weighted diff similarity
 // @description     - `text/event-stream` — SSE stream (async progress or sync upload)
 // @description     - `application/pdf`, `application/vnd...docx` — file download
 // @description
@@ -63,6 +64,7 @@
 // @description     `POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**
 // @description     (existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**
 // @description     (upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).
+// @description     `similarity_percent` is weighted similarity: `sum(sim_i*weight_left_i)/max(sumWeightsLeft,sumWeightsRight)*100`.
 // @description     Use `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.
 // @description
 // @description     ### SSE progress stages

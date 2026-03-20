@@ -95,6 +95,8 @@ legist/
 ### Configuration — performance and network
 - Any setting that **materially affects performance or network load** (batch sizes, HTTP timeouts to LLM/embed services, retry counts, SSE progress throttle intervals, window sizes, etc.) MUST be driven by **environment variables** documented in `internal/config/config.go` — avoid hard-coding such values in application code.
 - Examples: `LLM_METADATA_WINDOW`, `LLM_METADATA_RETRIES`, `METADATA_LLM_HTTP_TIMEOUT_MS`; chunk embedding: `EMBED_BATCH_SIZE`, `EMBED_PROGRESS_INTERVAL_MS`, `EMBED_HTTP_TIMEOUT_MS` (see `internal/config/config.go`).
+- Diff chunk matching (Stage 3 `matching`): `DIFF_MATCH_THRESHOLD_LOW` (hard candidate cut), `DIFF_MATCH_THRESHOLD_HIGH` (keep cut in risk-zone), `DIFF_MATCH_REGEX_FILE` (optional newline-delimited `TAG|REGEXP` rules).
+- Weighted chunking/embedding: `WEIGHT_CRITICAL`, `WEIGHT_MAIN`, `WEIGHT_STANDARD`, `WEIGHT_TECHNICAL`, `WEIGHT_MAX_CAP`; embedding prefix controls: `EMBED_USE_WEIGHT_PREFIX`, `EMBED_SHORT_CHUNK_PREFIX_MAX_CHARS`.
 - **LLM prompt text** is not hard-coded in Go: set **`METADATA_LLM_PROMPT_FILE`** to a UTF-8 file path (full instructions ending before the document fragment is appended). If unset, the bundled **`internal/config/metadata_prompt_default.txt`** (embedded at build time) is used.
 
 ### Language
@@ -114,7 +116,8 @@ legist/
 - Originals: `DATA_PATH/pdf/{file_id}` or `DATA_PATH/docx/{file_id}` (by mime)
 - Source links: `DATA_PATH/sources/{file_id}` → symlink to file in `pdf/` or `docx/`
 - Canonical plain text: `DATA_PATH/plain/{file_id}`
-- **Lessed** artifact JSON: `DATA_PATH/lessed/{file_id}` — media type **`application/lessed`**. `sections[].chunks[]` hold `content` (full line/chunk text), `plain_start` / `plain_end`, section ids; optional `chunk_embeddings` (one vector per chunk, same DFS order as `content`) and `embedding_model` after embedding (`EMBED_MODEL`); re-embedded when the model changes or vectors are missing/stale.
+- **Lessed** artifact JSON: `DATA_PATH/lessed/{file_id}` — media type **`application/lessed`**. `chunk_content[]` stores chunk texts (DFS order). `sections[].chunks[]` hold only positional metadata (`plain_start` / `plain_end`, section ids). Optional `chunk_embeddings` (one vector per chunk, same DFS order as `chunk_content`) and `embedding_model` after embedding (`EMBED_MODEL`).
+- Each `sections[].chunks[]` metadata item may include `weight` (assigned at parser stage via regex classifier, capped by `WEIGHT_MAX_CAP`) and used by weighted similarity score.
 - Public laws (RAG base): `files.user_id IS NULL` in DB, populated by Python scripts
 - User files: `files.user_id = <user_id>`
 
@@ -165,7 +168,7 @@ Diff pipeline (channel = diff id; subscribe via `POST /diffs` or `GET /diffs/:id
 - Section IDs: hierarchical `s1`, `s1.2`, `s1.2.3`
 - `Flatten()` — all sections DFS
 - `FlattenLeaves()` — leaf sections only (for Qdrant / downstream chunk addressing)
-- `FlattenChunkContents()` — DFS chunk texts in embedding order (matches `chunk_embeddings`)
+- `chunk_content[]` in `ParsedFile` is the canonical DFS chunk-text sequence for embeddings/diff
 - `MatchKey()` — stable diff key: `section_type:num` (survives renumbering)
 
 ### AKN Metadata

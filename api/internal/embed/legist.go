@@ -2,6 +2,8 @@ package embedder
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +17,15 @@ type Config struct {
 	OllamaBaseURL string
 	Model         string
 	BatchSize     int
+	// If >0 and chunk length is below this limit, prefix text as "{section_id}:{content}".
+	ShortChunkPrefixMaxChars int
+	UseWeightPrefix          bool
+	WeightCritical           float64
+	WeightMain               float64
+	WeightStandard           float64
+	WeightTechnical          float64
+	WeightMaxCap             float64
+	EmbeddingContextHash     string
 	// Min time between throttled progress callbacks after the first emit (0 = only gate on percent change).
 	ProgressInterval time.Duration
 	HTTPTimeout      time.Duration
@@ -37,13 +48,27 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 		return fmt.Errorf("parse legist json: %w", err)
 	}
 
-	if pf.EmbeddingsCurrent(cfg.Model) {
+	contextHash := cfg.EmbeddingContextHash
+	if contextHash == "" {
+		contextHash = computeEmbeddingContextHash(cfg)
+	}
+	if pf.EmbeddingsCurrent(cfg.Model, cfg.ShortChunkPrefixMaxChars, contextHash) {
 		return nil
 	}
 
-	texts := parser.FlattenChunkContents(pf.Sections)
+	texts := make([]string, len(pf.ChunkContent))
+	copy(texts, pf.ChunkContent)
 	if len(texts) == 0 {
 		return nil
+	}
+	weights := parser.FlattenChunkWeights(pf.Sections)
+	if len(weights) != len(texts) {
+		return fmt.Errorf("embed: chunk_content and chunk weight length mismatch (%d != %d)", len(texts), len(weights))
+	}
+	if cfg.UseWeightPrefix {
+		for i := range texts {
+			texts[i] = weightPrefix(weights[i], cfg) + " " + texts[i]
+		}
 	}
 
 	total := len(texts)
@@ -111,6 +136,8 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 
 	pf.ChunkEmbeddings = out
 	pf.EmbeddingModel = cfg.Model
+	pf.EmbeddingShortChunkPrefixMaxChars = cfg.ShortChunkPrefixMaxChars
+	pf.EmbeddingContextHash = contextHash
 
 	serialized, err := json.MarshalIndent(&pf, "", "  ")
 	if err != nil {
@@ -128,4 +155,45 @@ func LegistEmbedIfNeeded(ctx context.Context, path string, cfg Config, onProgres
 		ChunksTotal:      total,
 	})
 	return nil
+}
+
+func weightPrefix(w float64, cfg Config) string {
+	crit := cfg.WeightCritical
+	main := cfg.WeightMain
+	tech := cfg.WeightTechnical
+	if crit <= 0 {
+		crit = 3.0
+	}
+	if main <= 0 {
+		main = 2.0
+	}
+	if tech <= 0 {
+		tech = 0.5
+	}
+	switch {
+	case w >= crit:
+		return "[W3]"
+	case w >= main:
+		return "[W2]"
+	case w <= tech:
+		return "[W05]"
+	default:
+		return "[W1]"
+	}
+}
+
+func computeEmbeddingContextHash(cfg Config) string {
+	payload := fmt.Sprintf(
+		"model=%s|weight_prefix=%t|short_prefix_max=%d|w_crit=%.6f|w_main=%.6f|w_std=%.6f|w_tech=%.6f|w_cap=%.6f",
+		cfg.Model,
+		cfg.UseWeightPrefix,
+		cfg.ShortChunkPrefixMaxChars,
+		cfg.WeightCritical,
+		cfg.WeightMain,
+		cfg.WeightStandard,
+		cfg.WeightTechnical,
+		cfg.WeightMaxCap,
+	)
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
 }

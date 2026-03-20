@@ -76,6 +76,7 @@ type PipelineConfig struct {
 	// LLM settings
 	MetaExtractor MetaExtractorConfig
 	WindowSize    int
+	WeightConfig  ChunkWeightConfig
 
 	ParserVersion string
 }
@@ -275,6 +276,7 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 
 	// --- 8. Assemble and write artifacts ---
 	emit(StageSaving, "writing plain and lessed artifacts")
+	assignChunkWeights(raw, cfg.WeightConfig)
 
 	pf := &ParsedFile{
 		FileID:     cfg.FileID,
@@ -300,6 +302,7 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 			Keywords:             res.Keywords,
 		},
 		Sections:      raw.Sections,
+		ChunkContent:  raw.ChunkContent,
 		PlainTextPath: filepath.ToSlash(filepath.Join("plain", cfg.FileID)),
 		PlainTextLen:  len([]rune(raw.PlainText)),
 		ParsedAt:      time.Now().UTC(),

@@ -56,11 +56,11 @@ type Section struct {
 	References  []TLCReference `json:"references,omitempty"`
 }
 
-// ChunkRef is one embeddable chunk: full text plus its span in canonical plain text.
+// ChunkRef stores chunk placement metadata in canonical plain text.
 type ChunkRef struct {
-	Content    string `json:"content"`               // chunk text (embedded as a whole)
-	PlainStart int    `json:"plain_start"`           // rune offset, inclusive
-	PlainEnd   int    `json:"plain_end"`             // rune offset, exclusive
+	PlainStart int    `json:"plain_start"` // rune offset, inclusive
+	PlainEnd   int    `json:"plain_end"`   // rune offset, exclusive
+	Weight     float64 `json:"weight,omitempty"`
 	SectionID  string `json:"section_id,omitempty"`
 	SectionNum string `json:"section_num,omitempty"`
 }
@@ -78,8 +78,9 @@ func (s *Section) MatchKey() string {
 // The pipeline in pipeline.go combines it with LLM-extracted metadata
 // to produce a ParsedFile written to parsed.json.
 type Document struct {
-	Sections  []Section
-	PlainText string
+	Sections     []Section
+	ChunkContent []string // DFS order; aligns with sections[].chunks[] traversal
+	PlainText    string
 }
 
 func (d *Document) Flatten() []Section {
@@ -97,7 +98,8 @@ func (d *Document) Flatten() []Section {
 
 // appendChunk returns a chunk ref with the given line text (offsets filled in assignChunkOffsets).
 func (d *Document) appendChunk(line string) ChunkRef {
-	return ChunkRef{Content: line}
+	d.ChunkContent = append(d.ChunkContent, line)
+	return ChunkRef{}
 }
 
 func (d *Document) FlattenLeaves() []Section {
@@ -123,25 +125,48 @@ type ParsedFile struct {
 	DocumentID    string     `json:"document_id"`
 	Meta          ParsedMeta `json:"meta"`
 	Sections      []Section  `json:"sections"`
+	ChunkContent  []string   `json:"chunk_content"`
 	PlainTextPath string     `json:"plain_text_path"`
 	PlainTextLen  int        `json:"plain_text_len"`
 
 	ParsedAt      time.Time `json:"parsed_at"`
 	ParserVersion string    `json:"parser_version"`
 
-	// ChunkEmbeddings — one vector per chunk in FlattenChunkContents order (DFS section order).
+	// ChunkEmbeddings — one vector per chunk in chunk_content order (DFS section order).
 	ChunkEmbeddings [][]float64 `json:"chunk_embeddings,omitempty"`
 	EmbeddingModel  string      `json:"embedding_model,omitempty"`
+	EmbeddingShortChunkPrefixMaxChars int    `json:"embedding_short_chunk_prefix_max_chars,omitempty"`
+	EmbeddingContextHash              string `json:"embedding_context_hash,omitempty"`
 }
 
-// FlattenChunkContents returns each chunk's content in the same order as assignChunkOffsets (DFS over sections).
-func FlattenChunkContents(sections []Section) []string {
+// FlattenChunkSectionIDs returns section_id for each chunk in DFS order.
+func FlattenChunkSectionIDs(sections []Section) []string {
 	var out []string
 	var walk func([]Section)
 	walk = func(ss []Section) {
 		for i := range ss {
 			for _, ch := range ss[i].Chunks {
-				out = append(out, ch.Content)
+				out = append(out, ch.SectionID)
+			}
+			walk(ss[i].Children)
+		}
+	}
+	walk(sections)
+	return out
+}
+
+// FlattenChunkWeights returns chunk weights in DFS order.
+func FlattenChunkWeights(sections []Section) []float64 {
+	var out []float64
+	var walk func([]Section)
+	walk = func(ss []Section) {
+		for i := range ss {
+			for _, ch := range ss[i].Chunks {
+				w := ch.Weight
+				if w <= 0 {
+					w = 1.0
+				}
+				out = append(out, w)
 			}
 			walk(ss[i].Children)
 		}
@@ -151,13 +176,19 @@ func FlattenChunkContents(sections []Section) []string {
 }
 
 // EmbeddingsCurrent reports whether stored embeddings match chunk contents and expectedModel.
-func (pf *ParsedFile) EmbeddingsCurrent(expectedModel string) bool {
-	texts := FlattenChunkContents(pf.Sections)
+func (pf *ParsedFile) EmbeddingsCurrent(expectedModel string, expectedPrefixLimit int, expectedContextHash string) bool {
+	texts := pf.ChunkContent
 	n := len(texts)
 	if n == 0 {
-		return true
+		return len(pf.ChunkEmbeddings) == 0
 	}
 	if pf.EmbeddingModel != expectedModel {
+		return false
+	}
+	if pf.EmbeddingShortChunkPrefixMaxChars != expectedPrefixLimit {
+		return false
+	}
+	if pf.EmbeddingContextHash != expectedContextHash {
 		return false
 	}
 	if len(pf.ChunkEmbeddings) != n {

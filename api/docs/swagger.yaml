@@ -443,7 +443,9 @@ info:
     Use the `Accept` header to control response format:
     - `application/json` — JSON metadata (default)
     - `application/lessed` — parsed document structure and AKN metadata (when file status is `done`);
-      `sections[].chunks[]` carry `content` (full chunk text), `plain_start` / `plain_end` (rune offsets); optional `chunk_embeddings[][]` (same DFS order as chunks) and `embedding_model` when embedding completed
+    `chunk_content[]` stores chunk texts in DFS order; `sections[].chunks[]` keep positional metadata (`plain_start` / `plain_end`, section ids);
+    optional `chunk_embeddings[][]` (one vector per chunk in the same DFS order as `chunk_content`) and `embedding_model` when embedding completed;
+    each positional chunk metadata entry may contain `weight` used for weighted diff similarity
     - `text/event-stream` — SSE stream (async progress or sync upload)
     - `application/pdf`, `application/vnd...docx` — file download
 
@@ -466,6 +468,7 @@ info:
     `POST /diffs` (multipart, `Idempotency-Key`) compares two file versions. Modes: **`left_file_id` + `right_file_id`**
     (existing files, same document, both parsed); **one of those ids + `file`** (upload the other side); **`file_left` + `file_right`**
     (upload both, new document; optional Work metadata fields). JSON response is minimal (`object: diff`, ids, `status`, `similarity_percent` when done).
+    `similarity_percent` is weighted similarity: `sum(sim_i*weight_left_i)/max(sumWeightsLeft,sumWeightsRight)*100`.
     Use `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.
 
     ### SSE progress stages
@@ -478,8 +481,8 @@ info:
     | `saving` | Writing plain and legist artifacts to disk |
     | `embedding_started` | Chunk embedding via Ollama started (`chunks_total`) |
     | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
-    | `embedding_done` | Embeddings written to legist |
-    | `matching` | Diff chunk matching progress (cosine + greedy one-to-one; percent based on `N_left`) |
+    | `embedding_done` | Embeddings written to legist JSON |
+    | `matching` | Diff chunk matching progress (cosine + greedy one-to-one); `embedding_percent` carries similarity progress based on `N_left` |
     | `done` | Processing complete (parse + metadata + embeddings) |
     | `failed` | Processing failed; `error` and `missing_fields` present |
 
@@ -490,6 +493,9 @@ info:
     are stored on the File and are optional. If not supplied explicitly, the LLM
     attempts to extract them from the document text. After upload, expression-level
     fields can be corrected via `PATCH /files/:id`.
+
+    ## LLM prompts
+    Metadata extraction instructions are not hard-coded in Go: set `METADATA_LLM_PROMPT_FILE` to a text file path, or rely on the bundled default (`internal/config/metadata_prompt_default.txt` embedded at build time). Tune `METADATA_LLM_HTTP_TIMEOUT_MS` for Ollama latency.
 
     ## Webhooks
     Register endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.
@@ -655,9 +661,15 @@ paths:
         in: formData
         name: name
         type: string
-      - description: Greedy chunk matching threshold for diff (admin only; default from DIFF_MATCH_THRESHOLD)
+      - description: Hard threshold for diff chunk matching (admin only; default from
+          DIFF_MATCH_THRESHOLD_LOW)
         in: formData
-        name: match_threshold
+        name: match_threshold_low
+        type: number
+      - description: Soft threshold for diff chunk matching (admin only; default from
+          DIFF_MATCH_THRESHOLD_HIGH)
+        in: formData
+        name: match_threshold_high
         type: number
       - description: application/json | text/event-stream
         in: header
@@ -1206,8 +1218,8 @@ paths:
           type: string
         name: expand[]
         type: array
-      - description: application/json | application/lessed | application/pdf |
-          application/vnd...docx | text/event-stream
+      - description: application/json | application/lessed | application/pdf | application/vnd...docx
+          | text/event-stream
         in: header
         name: Accept
         type: string
@@ -1799,8 +1811,8 @@ tags:
 - description: 'AKN Work-level documents: create, list, get, patch, delete; add and
     list file versions under `/documents/:id/files`.'
   name: Documents
-- description: 'File versions at `/files`: upload, list, get (JSON, legist, binary,
-    SSE), patch expression-level metadata, delete.'
+- description: 'File versions at `/files`: upload, list, get (JSON, application/lessed,
+    binary, SSE), patch expression-level metadata, delete.'
   name: Files
 - description: 'Compare two versions of the same document: multipart job creation,
     list, get, and SSE for async progress.'
