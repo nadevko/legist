@@ -1,8 +1,8 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ACTS_DATA, CHANGES_DATA, HIERARCHY_DATA, VIOLATIONS_DATA, CHAIN_VERSIONS_DATA } from '../data'
 import { useUIStore, useCompareStore } from '../store'
-import { useFileUpload, useCompareProgress, useAssistant } from '../hooks'
+import { useCompareProgress, useAssistant } from '../hooks'
 import { rBdg, rFull, pl, esc, PROGRESS_STEPS } from '../utils/helpers'
 import { apiFetch } from '../utils/api'
 import type { Version, Risk } from '../types'
@@ -100,12 +100,35 @@ export function ActDetailPage() {
   }
 
   const startCompare = () => {
-    if (checked.length !== 2) { showToast('⚠ Выберите ровно 2 версии для сравнения'); return }
+    if (checked.length !== 2) {
+      showToast('⚠ Выберите ровно 2 версии для сравнения')
+      return
+    }
     const [a, b] = [...checked].sort((x, y) => x.num - y.num)
-    setCompare('Анализ изменений', (currentAct?.title || 'Документ') + ' · Версия ' + a.num + ' → Версия ' + b.num + ' · ' + a.date + ' vs ' + b.date)
-    progress.start(id || 'temp', () => {
+
+    if (!a.id || !b.id) {
+      showToast('⚠ Не удалось определить file_id выбранных версий')
+      return
+    }
+
+    if (a.status === 'Загрузка' || b.status === 'Загрузка') {
+      showToast('⚠ Дождитесь завершения загрузки обеих выбранных версий')
+      return
+    }
+
+    setCompare(
+      'Анализ изменений',
+      (currentAct?.title || 'Документ') + ' · Версия ' + a.num + ' → Версия ' + b.num + ' · ' + a.date + ' vs ' + b.date,
+    )
+
+    // Call diff endpoint with both file IDs from the same document.
+    const diffFd = new FormData()
+    diffFd.append('left_file_id', a.id)
+    diffFd.append('right_file_id', b.id)
+
+    progress.startDiff(diffFd, (diffId) => {
       setRows(rs => rs.map(r => ({ ...r, checked: false })))
-      navigate('/compare/1')
+      navigate(`/compare/${diffId}`)
     })
   }
 
@@ -132,7 +155,7 @@ export function ActDetailPage() {
           <p className="detail-sub">{currentAct.org} · {rows.length} {pl(rows.length, 'версия', 'версии', 'версий')}</p>
         </div>
         <div className="detail-header-actions">
-          <button className="btn-dark" onClick={() => navigate('/compare/1')}>
+          <button className="btn-dark" disabled={checked.length !== 2 || progress.running} onClick={startCompare}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="9" height="18" rx="1" /><rect x="13" y="3" width="9" height="18" rx="1" /></svg>
             Сравнить версии
           </button>
@@ -154,7 +177,7 @@ export function ActDetailPage() {
           ))}
         </div>
         <button
-          disabled={checked.length !== 2}
+          disabled={checked.length !== 2 || progress.running}
           style={{ marginLeft: 'auto', opacity: checked.length !== 2 ? 0.45 : 1, cursor: checked.length !== 2 ? 'not-allowed' : 'pointer', background: 'var(--txt)', color: '#fff', border: 'none', borderRadius: 'var(--r)', padding: '7px 14px', fontFamily: 'var(--font)', fontSize: 13, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           onClick={startCompare}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="9" height="18" rx="1" /><rect x="13" y="3" width="9" height="18" rx="1" /></svg>
@@ -301,11 +324,49 @@ export function ActDetailPage() {
 export function HomePage() {
   const navigate = useNavigate()
   const showToast = useUIStore(s => s.showToast)
-  const { oldFile, newFile, dzOldOver, dzNewOver, loadingOld, loadingNew, setDzOldOver, setDzNewOver, onDrop, onSelect, removeOld, removeNew } = useFileUpload()
   const progress = useCompareProgress()
+  const [oldFile, setOldFile] = useState<File | null>(null)
+  const [newFile, setNewFile] = useState<File | null>(null)
+  const [dzOldOver, setDzOldOver] = useState(false)
+  const [dzNewOver, setDzNewOver] = useState(false)
+  const [loadingOld, setLoadingOld] = useState(false)
+
   const [recent, setRecent] = useState<any[]>([])
   const fiOldRef = useRef<HTMLInputElement>(null)
   const fiNewRef = useRef<HTMLInputElement>(null)
+
+  const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100 MB
+
+  const removeOld = () => setOldFile(null)
+  const removeNew = () => setNewFile(null)
+
+  const onDrop = useCallback((e: React.DragEvent, side: 'old' | 'new') => {
+    e.preventDefault()
+    setDzOldOver(false)
+    setDzNewOver(false)
+
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    if (file.size > MAX_FILE_SIZE) {
+      showToast(`⚠ Макс размер файла 100 МБ. Ваш файл ${(file.size / 1024 / 1024).toFixed(1)} МБ`)
+      return
+    }
+
+    if (side === 'old') setOldFile(file)
+    else setNewFile(file)
+  }, [showToast])
+
+  const onSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>, side: 'old' | 'new') => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > MAX_FILE_SIZE) {
+      showToast(`⚠ Макс размер файла 100 МБ. Ваш файл ${(file.size / 1024 / 1024).toFixed(1)} МБ`)
+      return
+    }
+
+    if (side === 'old') setOldFile(file)
+    else setNewFile(file)
+  }, [showToast])
 
   useEffect(() => {
     const fetchRecent = async () => {
@@ -320,7 +381,7 @@ export function HomePage() {
           if (data.object === 'list') {
             setRecent(data.data.map((f: any) => ({
               id: f.id,
-              title: f.filename,
+              title: f.name,
               org: 'Мои загрузки',
               v1: '—',
               v2: 'v1',
@@ -336,10 +397,57 @@ export function HomePage() {
     fetchRecent()
   }, [])
 
-  const startCompare = () => {
-    if (!oldFile || !newFile) { showToast('⚠ Загрузите оба файла для сравнения'); return }
-    if (!newFile.id) { showToast('⚠ Дождитесь завершения загрузки файла'); return }
-    progress.start(newFile.id, () => navigate('/compare/new'))
+  const startCompare = async () => {
+    if (!oldFile || !newFile) {
+      showToast('⚠ Загрузите оба файла для сравнения')
+      return
+    }
+    if (progress.running || loadingOld) return
+
+    const token = localStorage.getItem('legist_token')
+    if (!token) {
+      showToast('⚠ Авторизуйтесь для загрузки файлов')
+      return
+    }
+
+    setLoadingOld(true)
+    try {
+      // 1) Create the left side as a new file/version, but do it lazily to avoid
+      // duplicate document creation conflicts.
+      const uploadFd = new FormData()
+      uploadFd.append('file', oldFile)
+      uploadFd.append('lazy', 'true')
+
+      const uploadRes = await apiFetch('/api/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: uploadFd,
+      })
+
+      if (!uploadRes.ok) {
+        const data = await uploadRes.json().catch(() => null)
+        throw new Error(data?.error?.message || `Ошибка загрузки (${uploadRes.status})`)
+      }
+
+      const uploadData = await uploadRes.json()
+      const leftFileId = uploadData?.id as string | undefined
+      if (!leftFileId) throw new Error('Не удалось получить id левой стороны')
+
+      // 2) Create a diff by uploading the right side inside the diff request.
+      const diffFd = new FormData()
+      diffFd.append('left_file_id', leftFileId)
+      diffFd.append('file', newFile)
+
+      progress.startDiff(diffFd, (diffId) => navigate(`/compare/${diffId}`))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка загрузки'
+      showToast('⚠ ' + msg)
+    } finally {
+      setLoadingOld(false)
+    }
   }
 
   const recentComparisons = recent.length > 0 ? recent : [
@@ -394,7 +502,7 @@ export function HomePage() {
           <FileCard side="new" file={newFile} dzOver={dzNewOver} setOver={setDzNewOver} />
         </div>
 
-        <button className="btn-compare" disabled={progress.running} onClick={startCompare}>
+        <button className="btn-compare" disabled={progress.running || loadingOld || !oldFile || !newFile} onClick={startCompare}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12" /></svg>
           Сравнить редакции
         </button>
@@ -462,6 +570,37 @@ export function ComparePage() {
   const showToast = useUIStore(s => s.showToast)
   const setModalNtsi = useUIStore(s => s.setModalNtsi)
   const { title, sub } = useCompareStore()
+  const { jobId } = useParams<{ jobId: string }>()
+  const [diffMeta, setDiffMeta] = useState<any | null>(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('legist_token')
+    if (!token) return
+    if (!jobId) return
+
+    // We only fetch for real diff IDs (prevent demo routes like "/compare/new").
+    if (!/^diff_[a-f0-9]{12}$/i.test(jobId)) return
+
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await apiFetch(`/api/diffs/${jobId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled) setDiffMeta(data)
+      } catch (err) {
+        console.error('Fetch diff meta error:', err)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [jobId])
+
   const [tab, setTab] = useState<'table' | 'vtv' | 'check'>('table')
   const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState<'all' | 'red' | 'orange' | 'green'>('all')
@@ -543,6 +682,14 @@ export function ComparePage() {
         <div>
           <h1 className="cmp-title">{title}</h1>
           <p className="cmp-sub">{sub}</p>
+          {diffMeta && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+              Статус: {diffMeta.status}
+              {typeof diffMeta.similarity_percent === 'number' && (
+                <> · Совпадение: {Math.round(diffMeta.similarity_percent)}%</>
+              )}
+            </div>
+          )}
         </div>
         <div className="cmp-header-actions">
           <button className="btn-outline" onClick={() => showToast('📄 Экспорт .docx (требуется backend)')}>

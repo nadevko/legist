@@ -33,7 +33,7 @@ export function ActsPage() {
             setActs(data.data.map((f: any) => ({
               id: f.id,
               type: 'ЛНА', // Бэкенд пока не хранит тип, ставим по умолчанию
-              title: f.filename || 'Без названия',
+              title: f.name || 'Без названия',
               org: 'Мои документы',
               versions: 1, // В текущей модели бэкенда 1 файл = 1 версия
               date: new Date(f.created * 1000).toLocaleDateString('ru-RU'),

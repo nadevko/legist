@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import DOMPurify from 'dompurify'
 import { useUIStore } from '../store'
 import { PROGRESS_STEP_LABELS, PROGRESS_STEPS } from '../utils/helpers'
 import { apiFetch } from '../utils/api'
+import { streamSse } from '../utils/sse'
 import type { FileInfo } from '../types'
 
 // ── useToast ──────────────────────────────────────────────
@@ -100,11 +101,16 @@ export function useFileUpload() {
     try {
       const data = await attemptUpload()
 
-      const info: FileInfo = { id: data.id, name: data.filename, size: data.size || file.size }
+      const info: FileInfo = {
+        id: data.id,
+        name: data.name ?? data.filename ?? file.name,
+        size: data.size ?? file.size,
+        documentId: data.document_id ?? data.documentId,
+      }
       if (side === 'old') setOldFile(info)
       else setNewFile(info)
 
-      showToast(`✓ Файл ${data.filename} загружен`)
+      showToast(`✓ Файл ${data.name ?? data.filename ?? file.name} загружен`)
       return data.id
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Ошибка загрузки'
@@ -153,51 +159,218 @@ export function useCompareProgress() {
   const [pct, setPct] = useState(0)
   const [step, setStep] = useState(0)
   const [label, setLabel] = useState('')
-  const esRef = useRef<EventSource | null>(null)
+
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  const stageToStep = (stage?: string) => {
+    switch (stage) {
+      case 'parsing_started':
+        return 0
+      case 'llm_requested':
+      case 'llm_skipped':
+      case 'llm_done':
+        return 2
+      case 'saving':
+      case 'embedding_started':
+      case 'embedding':
+      case 'embedding_done':
+      case 'matching':
+        return 3
+      case 'done':
+      case 'failed':
+      default:
+        return 4
+    }
+  }
+
+  const stageToDefaultLabel = (stage?: string) => {
+    // Keep UI language stable even when backend messages are in English.
+    switch (stage) {
+      case 'parsing_started':
+        return PROGRESS_STEP_LABELS[0]
+      case 'llm_requested':
+      case 'llm_skipped':
+      case 'llm_done':
+        return PROGRESS_STEP_LABELS[2]
+      case 'saving':
+      case 'embedding_started':
+      case 'embedding':
+      case 'embedding_done':
+      case 'matching':
+        return PROGRESS_STEP_LABELS[3]
+      case 'done':
+        return 'Готово'
+      case 'failed':
+        return 'Ошибка обработки'
+      default:
+        return 'Ожидание сервера...'
+    }
+  }
 
   const start = useCallback((fileId: string, onDone: () => void) => {
-    if (esRef.current) esRef.current.close()
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
 
-    setRunning(true); setPct(0); setStep(0)
+    setRunning(true)
+    setPct(0)
+    setStep(0)
     setLabel('Ожидание сервера...')
 
     const token = localStorage.getItem('legist_token')
     const url = `/api/files/${fileId}`
-    
-    // Бэкенд поддерживает SSE через заголовок Accept: text/event-stream
-    // Native EventSource не поддерживает кастомные заголовки (Authorization),
-    // поэтому в некоторых случаях используют куки или query param.
-    // Но так как мы в dev-режиме, бэкенд может ожидать токен.
-    
-    const es = new EventSource(url)
-    esRef.current = es
 
-    es.addEventListener('progress', (e: any) => {
+    let ok = false
+
+    const run = async () => {
       try {
-        const data = JSON.parse(e.data)
-        setPct(data.percentage || 50)
-        setLabel(data.message || 'Обработка...')
+        await streamSse(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'text/event-stream',
+          },
+          signal: controller.signal,
+          onEvent: (evt) => {
+            if (evt.type === 'progress') {
+              const data = evt.data ?? {}
+              const stage = typeof data.stage === 'string' ? data.stage : undefined
+
+              const embeddingPct = typeof data.embedding_percent === 'number' ? data.embedding_percent : undefined
+              const chunksEmbedded = typeof data.chunks_embedded === 'number' ? data.chunks_embedded : undefined
+
+              setStep(stageToStep(stage))
+
+              setLabel(data.message || stageToDefaultLabel(stage) + (chunksEmbedded != null ? ` (${chunksEmbedded}...)` : ''))
+              if (embeddingPct != null) setPct(Math.max(0, Math.min(100, embeddingPct)))
+              return
+            }
+
+            if (evt.type === 'done') {
+              ok = true
+              setPct(100)
+              setStep(4)
+              setLabel('Готово')
+              return
+            }
+
+            if (evt.type === 'failed') {
+              ok = false
+              setStep(4)
+              setLabel(evt.data?.error ? `Ошибка: ${String(evt.data.error)}` : 'Ошибка обработки')
+            }
+          },
+        })
       } catch (err) {
-        console.error('Failed to parse SSE progress:', err)
+        if (controller.signal.aborted) return
+        setStep(4)
+        setLabel('Ошибка обработки')
+        console.error('SSE file error:', err)
+      } finally {
+        setRunning(false)
+        if (ok) onDone()
       }
-    })
+    }
 
-    es.addEventListener('done', () => {
-      setPct(100)
-      setLabel('Готово')
-      es.close()
-      setTimeout(() => { setRunning(false); onDone() }, 600)
-    })
+    void run()
+  }, [setRunning])
 
-    es.addEventListener('error', (e) => {
-      console.error('SSE Error:', e)
-      setLabel('Ошибка обработки')
-      es.close()
-      setTimeout(() => setRunning(false), 2000)
-    })
-  }, [])
+  const startDiff = useCallback((diffFormData: FormData, onDone: (diffId: string) => void) => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
 
-  return { running, pct, step, label, start, steps: PROGRESS_STEPS }
+    setRunning(true)
+    setPct(0)
+    setStep(0)
+    setLabel('Ожидание сервера...')
+
+    const token = localStorage.getItem('legist_token')
+
+    let ok = false
+    let diffId = ''
+
+    const run = async () => {
+      try {
+        await streamSse('/api/diffs', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'text/event-stream',
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: diffFormData,
+          signal: controller.signal,
+          onEvent: (evt) => {
+            if (evt.type === 'diff_started') {
+              setLabel('Сравнение документов...')
+              setStep(0)
+              setPct((p) => Math.max(p, 5))
+              return
+            }
+
+            if (evt.type === 'progress') {
+              // Diff progress event shape:
+              // {file_id:<null>, progress: ParseProgress} OR direct ParseProgress.
+              const data = evt.data ?? {}
+              const p = data.progress ?? data
+              const stage = typeof p.stage === 'string' ? p.stage : undefined
+              const embeddingPct = typeof p.embedding_percent === 'number' ? p.embedding_percent : undefined
+
+              setStep(stageToStep(stage))
+              setLabel(p.message || stageToDefaultLabel(stage))
+              if (embeddingPct != null) setPct(Math.max(0, Math.min(100, embeddingPct)))
+              return
+            }
+
+            if (evt.type === 'file_done') {
+              setLabel('Подготовка сторон завершена...')
+              return
+            }
+
+            if (evt.type === 'file_failed') {
+              ok = false
+              setStep(4)
+              setLabel(evt.data?.error ? `Ошибка: ${String(evt.data.error)}` : 'Ошибка обработки')
+              return
+            }
+
+            if (evt.type === 'diff_done') {
+              ok = true
+              diffId = String(evt.data?.diff_id ?? '')
+              setPct(100)
+              setStep(4)
+              setLabel('Готово')
+              return
+            }
+
+            if (evt.type === 'diff_failed') {
+              ok = false
+              setStep(4)
+              setLabel(evt.data?.error ? `Ошибка: ${String(evt.data.error)}` : 'Ошибка обработки')
+              return
+            }
+          },
+        })
+      } catch (err) {
+        if (controller.signal.aborted) return
+        console.error('SSE diff error:', err)
+        setStep(4)
+        setLabel('Ошибка обработки')
+      } finally {
+        setRunning(false)
+        if (ok && diffId) onDone(diffId)
+      }
+    }
+
+    void run()
+  }, [setRunning])
+
+  return { running, pct, step, label, start, startDiff, steps: PROGRESS_STEPS }
 }
 
 // ── useAssistant ──────────────────────────────────────────
