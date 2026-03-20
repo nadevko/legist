@@ -479,6 +479,7 @@ info:
     | `embedding_started` | Chunk embedding via Ollama started (`chunks_total`) |
     | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
     | `embedding_done` | Embeddings written to legist |
+    | `matching` | Diff chunk matching progress (cosine + greedy one-to-one; percent based on `N_left`) |
     | `done` | Processing complete (parse + metadata + embeddings) |
     | `failed` | Processing failed; `error` and `missing_fields` present |
 
@@ -654,6 +655,10 @@ paths:
         in: formData
         name: name
         type: string
+      - description: Greedy chunk matching threshold for diff (admin only; default from DIFF_MATCH_THRESHOLD)
+        in: formData
+        name: match_threshold
+        type: number
       - description: application/json | text/event-stream
         in: header
         name: Accept

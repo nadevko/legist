@@ -36,6 +36,9 @@ type FormData struct {
 	PubName   string `form:"pub_name"`
 	PubDate   string `form:"pub_date"`
 	PubNumber string `form:"pub_number"`
+
+	// Chunk matching (diff) parameters. Nil = use env defaults.
+	MatchThreshold *float64 `form:"match_threshold"`
 }
 
 // ParseMultipart parses multipart/form-data once per request. Call before Bind / FormFile / MultipartForm.

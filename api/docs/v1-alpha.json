@@ -227,6 +227,12 @@
                         "in": "formData"
                     },
                     {
+                        "type": "number",
+                        "description": "Greedy chunk matching threshold for diff (admin only; default from DIFF_MATCH_THRESHOLD)",
+                        "name": "match_threshold",
+                        "in": "formData"
+                    },
+                    {
                         "type": "string",
                         "description": "application/json | text/event-stream",
                         "name": "Accept",

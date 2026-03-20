@@ -132,6 +132,7 @@ Progress stages during file processing:
 - `embedding_started` — chunk embedding started (`chunks_total`)
 - `embedding` — embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`)
 - `embedding_done` — vectors written to lessed JSON
+- `matching` — diff chunk matching progress (cosine + greedy one-to-one; percent based on `N_left`)
 - `done` — completed successfully (parse + metadata + embeddings when applicable)
 - `failed` — failed with error (`error`, `missing_fields` fields)
 

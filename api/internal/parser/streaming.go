@@ -19,6 +19,7 @@ const (
 	StageEmbeddingStarted  = "embedding_started"
 	StageEmbedding         = "embedding"
 	StageEmbeddingDone     = "embedding_done"
+	StageMatching          = "matching"
 	StageDone              = "done"
 	StageFailed            = "failed"
 )

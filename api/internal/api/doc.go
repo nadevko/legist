@@ -76,6 +76,7 @@
 // @description     | `embedding_started` | Chunk embedding via Ollama started (`chunks_total`) |
 // @description     | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
 // @description     | `embedding_done` | Embeddings written to legist JSON |
+// @description     | `matching` | Diff chunk matching progress (cosine + greedy one-to-one); `embedding_percent` carries similarity progress based on `N_left` |
 // @description     | `done` | Processing complete (parse + metadata + embeddings) |
 // @description     | `failed` | Processing failed; `error` and `missing_fields` present |
 // @description

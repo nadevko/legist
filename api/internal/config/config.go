@@ -44,6 +44,10 @@ type Config struct {
 	EmbedBatchSize           int
 	EmbedProgressIntervalMS  int
 	EmbedHTTPTimeoutMS       int
+
+	// Diff matching (chunk matching)
+	DiffMatchThreshold            float64
+	DiffMatchProgressIntervalMS  int
 }
 
 func Load() *Config {
@@ -83,6 +87,9 @@ func Load() *Config {
 		EmbedBatchSize:          getEnvInt("EMBED_BATCH_SIZE", 32),
 		EmbedProgressIntervalMS: getEnvInt("EMBED_PROGRESS_INTERVAL_MS", 500),
 		EmbedHTTPTimeoutMS:      getEnvInt("EMBED_HTTP_TIMEOUT_MS", 120000),
+
+		DiffMatchThreshold:          getEnvFloat("DIFF_MATCH_THRESHOLD", 0.7),
+		DiffMatchProgressIntervalMS: getEnvInt("DIFF_MATCH_PROGRESS_INTERVAL_MS", 500),
 	}
 	if cfg.EmbedBatchSize < 1 {
 		cfg.EmbedBatchSize = 32
@@ -95,6 +102,15 @@ func Load() *Config {
 	}
 	if cfg.MetadataHTTPTimeoutMS < 1 {
 		cfg.MetadataHTTPTimeoutMS = 60000
+	}
+	if cfg.DiffMatchThreshold < 0 {
+		cfg.DiffMatchThreshold = 0
+	}
+	if cfg.DiffMatchThreshold > 1 {
+		cfg.DiffMatchThreshold = 1
+	}
+	if cfg.DiffMatchProgressIntervalMS < 0 {
+		cfg.DiffMatchProgressIntervalMS = 500
 	}
 	cfg.MetadataLLMPrompt = loadMetadataLLMPrompt(getEnv("METADATA_LLM_PROMPT_FILE", ""))
 	return cfg
@@ -127,4 +143,16 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
 }
