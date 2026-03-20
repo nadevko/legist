@@ -397,6 +397,7 @@ info:
     ## Content negotiation
     Use the `Accept` header to control response format:
     - `application/json` — JSON metadata (default)
+    - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
     - `text/event-stream` — SSE stream (async progress or sync upload)
     - `application/pdf`, `application/vnd...docx` — file download
 
@@ -412,7 +413,7 @@ info:
     Files are parsed asynchronously after upload. Track progress via:
     1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`
     2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`
-    3. **Parsed result** — `GET /files/:id/parsed` (available when status=done)
+    3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 
     ### SSE progress stages
@@ -973,8 +974,8 @@ paths:
           type: string
         name: expand[]
         type: array
-      - description: application/json | application/pdf | application/vnd...docx |
-          text/event-stream
+      - description: application/json | application/legistoso | application/pdf |
+          application/vnd...docx | text/event-stream
         in: header
         name: Accept
         type: string
@@ -989,9 +990,13 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/api.apiErrorResponse'
+        "409":
+          description: 'not_ready when Accept: application/legistoso and parsing incomplete'
+          schema:
+            $ref: '#/definitions/api.apiErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get file metadata, download, or stream status
+      summary: Get file metadata, parsed artifact, download, or stream status
       tags:
       - files
     patch:
@@ -1031,35 +1036,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Update file Expression-level metadata
-      tags:
-      - files
-  /files/{id}/parsed:
-    get:
-      parameters:
-      - description: File ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/api.apiErrorResponse'
-        "409":
-          description: File not yet processed
-          schema:
-            $ref: '#/definitions/api.apiErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get parsed document structure and AKN metadata
       tags:
       - files
   /health:

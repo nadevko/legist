@@ -31,6 +31,7 @@
 // @description     ## Content negotiation
 // @description     Use the `Accept` header to control response format:
 // @description     - `application/json` — JSON metadata (default)
+// @description     - `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)
 // @description     - `text/event-stream` — SSE stream (async progress or sync upload)
 // @description     - `application/pdf`, `application/vnd...docx` — file download
 // @description
@@ -46,7 +47,7 @@
 // @description     Files are parsed asynchronously after upload. Track progress via:
 // @description     1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`
 // @description     2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`
-// @description     3. **Parsed result** — `GET /files/:id/parsed` (available when status=done)
+// @description     3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)
 // @description     4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events
 // @description
 // @description     ### SSE progress stages

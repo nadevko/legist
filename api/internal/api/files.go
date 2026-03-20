@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -19,6 +18,8 @@ import (
 	"github.com/nadevko/legist/internal/store"
 	"github.com/nadevko/legist/internal/webhook"
 )
+
+const mimeTypeLegistoso = "application/legistoso"
 
 // fileUploadRequest holds all optional metadata fields from multipart form.
 type fileUploadRequest struct {
@@ -137,15 +138,16 @@ func (s *Server) listFilesCore(c echo.Context, documentID *string) error {
 }
 
 // handleGetFile godoc
-// @Summary     Get file metadata, download, or stream status
+// @Summary     Get file metadata, parsed artifact, download, or stream status
 // @Tags        files
 // @Security    BearerAuth
 // @Param       id       path   string   true  "File ID"
 // @Param       expand[] query  []string false "Expand: document"
-// @Param       Accept   header string   false "application/json | application/pdf | application/vnd...docx | text/event-stream"
+// @Param       Accept   header string   false "application/json | application/legistoso | application/pdf | application/vnd...docx | text/event-stream"
 // @Produce     json
 // @Success     200 {object} fileResponse
 // @Failure     404 {object} apiErrorResponse
+// @Failure     409 {object} apiErrorResponse "not_ready when Accept: application/legistoso and parsing incomplete"
 // @Router      /files/{id} [get]
 func (s *Server) handleGetFile(c echo.Context) error {
 	f, err := s.resolveFile(c)
@@ -156,6 +158,8 @@ func (s *Server) handleGetFile(c echo.Context) error {
 	switch c.Request().Header.Get("Accept") {
 	case "text/event-stream":
 		return sse.Stream(c, s.broker, f.ID)
+	case mimeTypeLegistoso:
+		return s.serveParsedArtifact(c, f)
 	case "application/json", "":
 		return c.JSON(http.StatusOK, toFileResponse(*f))
 	default:
@@ -163,22 +167,7 @@ func (s *Server) handleGetFile(c echo.Context) error {
 	}
 }
 
-// handleGetParsed godoc
-// @Summary     Get parsed document structure and AKN metadata
-// @Tags        files
-// @Security    BearerAuth
-// @Param       id path string true "File ID"
-// @Produce     json
-// @Success     200 {object} map[string]any
-// @Failure     404 {object} apiErrorResponse
-// @Failure     409 {object} apiErrorResponse "File not yet processed"
-// @Router      /files/{id}/parsed [get]
-func (s *Server) handleGetParsed(c echo.Context) error {
-	f, err := s.resolveFile(c)
-	if err != nil {
-		return err
-	}
-
+func (s *Server) serveParsedArtifact(c echo.Context, f *store.File) error {
 	if f.Status != "done" {
 		return errorf(http.StatusConflict, "not_ready",
 			"file is not yet parsed (status: "+f.Status+")")
@@ -193,10 +182,7 @@ func (s *Server) handleGetParsed(c echo.Context) error {
 		}
 		return errorf(http.StatusInternalServerError, "server_error", "internal error")
 	}
-
-	// Stream raw JSON — avoids double-encode and preserves exact structure.
-	var raw json.RawMessage = data
-	return c.JSON(http.StatusOK, raw)
+	return c.Blob(http.StatusOK, mimeTypeLegistoso, data)
 }
 
 // handleUploadFile godoc

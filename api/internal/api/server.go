@@ -108,7 +108,6 @@ func (s *Server) registerRoutes() {
 	// GET  /files (document_id present) — alias → GET  /documents/:id/files
 	p.GET("/files", s.handleListFiles)
 	p.GET("/files/:id", s.handleGetFile)
-	p.GET("/files/:id/parsed", s.handleGetParsed)
 	p.POST("/files", s.handleUploadFile)
 	p.PATCH("/files/:id", s.handlePatchFile)
 	p.DELETE("/files/:id", s.handleDeleteFile)

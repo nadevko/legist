@@ -753,7 +753,7 @@ const docTemplate = `{
                 "tags": [
                     "files"
                 ],
-                "summary": "Get file metadata, download, or stream status",
+                "summary": "Get file metadata, parsed artifact, download, or stream status",
                 "parameters": [
                     {
                         "type": "string",
@@ -774,7 +774,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "application/json | application/pdf | application/vnd...docx | text/event-stream",
+                        "description": "application/json | application/legistoso | application/pdf | application/vnd...docx | text/event-stream",
                         "name": "Accept",
                         "in": "header"
                     }
@@ -788,6 +788,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.apiErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "not_ready when Accept: application/legistoso and parsing incomplete",
                         "schema": {
                             "$ref": "#/definitions/api.apiErrorResponse"
                         }
@@ -895,52 +901,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.apiErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/files/{id}/parsed": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Get parsed document structure and AKN metadata",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "File ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/api.apiErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "File not yet processed",
                         "schema": {
                             "$ref": "#/definitions/api.apiErrorResponse"
                         }
@@ -2318,7 +2278,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Legist API",
-	Description:      "AI assistant for comparing revisions of normative legal acts (НПА) of the Republic of Belarus.\n\n## Authentication\nAll endpoints except public auth routes require a Bearer token in the `Authorization` header.\nObtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.\n\n## Request IDs\nEvery response includes a `Request-Id` header for debugging.\n\n## Idempotency\n`POST` requests require an `Idempotency-Key` header.\nRepeating a request with the same key returns the cached response.\nKeys expire after 24 hours. Reusing a key for a different endpoint returns 422.\n\n## Ownership and access control\nResources belong to the authenticated user. Attempting to read or mutate\nanother user's resource returns 404 (not 403) to avoid leaking existence.\nPublic laws (`owner=public`) are readable by any authenticated user but cannot be mutated.\n\n## Pagination\nList endpoints support cursor-based pagination via `starting_after` and `ending_before`.\nDefault limit is 20, max 100. Response includes `has_more: true` if more items exist.\n\n## Expanding objects\nPass `expand[]=document` (or other resource name) to expand related objects inline.\n\n## Content negotiation\nUse the `Accept` header to control response format:\n- `application/json` — JSON metadata (default)\n- `text/event-stream` — SSE stream (async progress or sync upload)\n- `application/pdf`, `application/vnd...docx` — file download\n\n## Documents and files\nA **Document** is the AKN Work-level entity — it identifies one НПА across all its versions.\nA **File** is one physical version (редакция) of a Document.\nUploading via `POST /files` creates a new Document automatically.\nUploading via `POST /documents/:id/files` adds a version to an existing Document.\n`GET /files?document_id=:id` is an alias for `GET /documents/:id/files`.\n`POST /files` with `document_id` form field is an alias for `POST /documents/:id/files`.\n\n## File processing pipeline\nFiles are parsed asynchronously after upload. Track progress via:\n1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`\n2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`\n3. **Parsed result** — `GET /files/:id/parsed` (available when status=done)\n4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events\n\n### SSE progress stages\n| Stage | Description |\n|-------|-------------|\n| `parsing_started` | Document structure parsing in progress |\n| `llm_requested` | Metadata extraction request sent to LLM |\n| `llm_skipped` | All metadata was provided explicitly, LLM not needed |\n| `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |\n| `saving` | Writing parsed.json to disk |\n| `done` | Processing complete |\n| `failed` | Processing failed; `error` and `missing_fields` present |\n\n## AKN metadata\nMetadata follows Akoma Ntoso conventions. Work-level fields (`subtype`, `number`,\n`author`, `date`) are stored on the Document and are required for diff.\nExpression-level fields (`version_date`, `version_label`, `language`, `pub_*`)\nare stored on the File and are optional. If not supplied explicitly, the LLM\nattempts to extract them from the document text. After upload, expression-level\nfields can be corrected via `PATCH /files/:id`.\n\n## Webhooks\nRegister endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.\nVerify the `Legist-Signature: sha256=...` header using your endpoint secret.\nFailed deliveries are retried up to 3 times with exponential backoff (1s, 4s).\nInspect delivery history via `GET /webhooks/:id/events`.\nEnable or disable an endpoint via `PATCH /webhooks/:id` with `{\"enabled\": false}`.\n\n### Supported webhook events\n| Event | Description |\n|-------|-------------|\n| `file.created` | File uploaded |\n| `file.parsed` | Parsing and metadata extraction succeeded |\n| `file.failed` | Parsing or metadata extraction failed |\n| `file.deleted` | File deleted |\n| `diff.created` | Diff job started |\n| `diff.done` | Diff completed |\n| `diff.failed` | Diff failed |\n| `user.created` | User registered |\n| `user.deleted` | User deleted |\n\n### Signature verification (Go example)\n```go\nmac := hmac.New(sha256.New, []byte(secret))\nmac.Write(body)\nexpected := \"sha256=\" + hex.EncodeToString(mac.Sum(nil))\nok := hmac.Equal([]byte(expected), []byte(signature))\n```",
+	Description:      "AI assistant for comparing revisions of normative legal acts (НПА) of the Republic of Belarus.\n\n## Authentication\nAll endpoints except public auth routes require a Bearer token in the `Authorization` header.\nObtain tokens via `POST /sessions`. Refresh via `POST /tokens/refresh`.\n\n## Request IDs\nEvery response includes a `Request-Id` header for debugging.\n\n## Idempotency\n`POST` requests require an `Idempotency-Key` header.\nRepeating a request with the same key returns the cached response.\nKeys expire after 24 hours. Reusing a key for a different endpoint returns 422.\n\n## Ownership and access control\nResources belong to the authenticated user. Attempting to read or mutate\nanother user's resource returns 404 (not 403) to avoid leaking existence.\nPublic laws (`owner=public`) are readable by any authenticated user but cannot be mutated.\n\n## Pagination\nList endpoints support cursor-based pagination via `starting_after` and `ending_before`.\nDefault limit is 20, max 100. Response includes `has_more: true` if more items exist.\n\n## Expanding objects\nPass `expand[]=document` (or other resource name) to expand related objects inline.\n\n## Content negotiation\nUse the `Accept` header to control response format:\n- `application/json` — JSON metadata (default)\n- `application/legistoso` — parsed document structure and AKN metadata (when file status is `done`)\n- `text/event-stream` — SSE stream (async progress or sync upload)\n- `application/pdf`, `application/vnd...docx` — file download\n\n## Documents and files\nA **Document** is the AKN Work-level entity — it identifies one НПА across all its versions.\nA **File** is one physical version (редакция) of a Document.\nUploading via `POST /files` creates a new Document automatically.\nUploading via `POST /documents/:id/files` adds a version to an existing Document.\n`GET /files?document_id=:id` is an alias for `GET /documents/:id/files`.\n`POST /files` with `document_id` form field is an alias for `POST /documents/:id/files`.\n\n## File processing pipeline\nFiles are parsed asynchronously after upload. Track progress via:\n1. **Sync SSE** — `POST /files` with `Accept: text/event-stream`\n2. **Async SSE** — `GET /files/:id` with `Accept: text/event-stream`\n3. **Parsed result** — `GET /files/:id` with `Accept: application/legistoso` (available when status=done)\n4. **Webhooks** — register an endpoint, receive `file.parsed` or `file.failed` events\n\n### SSE progress stages\n| Stage | Description |\n|-------|-------------|\n| `parsing_started` | Document structure parsing in progress |\n| `llm_requested` | Metadata extraction request sent to LLM |\n| `llm_skipped` | All metadata was provided explicitly, LLM not needed |\n| `llm_done` | LLM responded; `meta_score` and `meta_ok` fields present |\n| `saving` | Writing parsed.json to disk |\n| `done` | Processing complete |\n| `failed` | Processing failed; `error` and `missing_fields` present |\n\n## AKN metadata\nMetadata follows Akoma Ntoso conventions. Work-level fields (`subtype`, `number`,\n`author`, `date`) are stored on the Document and are required for diff.\nExpression-level fields (`version_date`, `version_label`, `language`, `pub_*`)\nare stored on the File and are optional. If not supplied explicitly, the LLM\nattempts to extract them from the document text. After upload, expression-level\nfields can be corrected via `PATCH /files/:id`.\n\n## Webhooks\nRegister endpoints via `POST /webhooks`. Each delivery is signed with HMAC-SHA256.\nVerify the `Legist-Signature: sha256=...` header using your endpoint secret.\nFailed deliveries are retried up to 3 times with exponential backoff (1s, 4s).\nInspect delivery history via `GET /webhooks/:id/events`.\nEnable or disable an endpoint via `PATCH /webhooks/:id` with `{\"enabled\": false}`.\n\n### Supported webhook events\n| Event | Description |\n|-------|-------------|\n| `file.created` | File uploaded |\n| `file.parsed` | Parsing and metadata extraction succeeded |\n| `file.failed` | Parsing or metadata extraction failed |\n| `file.deleted` | File deleted |\n| `diff.created` | Diff job started |\n| `diff.done` | Diff completed |\n| `diff.failed` | Diff failed |\n| `user.created` | User registered |\n| `user.deleted` | User deleted |\n\n### Signature verification (Go example)\n```go\nmac := hmac.New(sha256.New, []byte(secret))\nmac.Write(body)\nexpected := \"sha256=\" + hex.EncodeToString(mac.Sum(nil))\nok := hmac.Equal([]byte(expected), []byte(signature))\n```",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

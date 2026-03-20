@@ -26,7 +26,7 @@ legist/
 │       │   ├── server.go         # Server struct, NewServer, registerRoutes
 │       │   ├── auth.go           # /users, /sessions, /tokens handlers
 │       │   ├── users.go          # password reset handlers
-│       │   ├── files.go          # file upload, list, get, patch, delete, parsed
+│       │   ├── files.go          # file upload, list, get, patch, delete (parsed via Accept: application/legistoso)
 │       │   ├── documents.go      # document CRUD handlers
 │       │   ├── webhooks.go       # webhook endpoint CRUD + events
 │       │   ├── chat.go           # /chat handler (stub)
@@ -276,10 +276,9 @@ POST   /documents/:id/files       — add version (canonical); alias: POST /file
 
 GET    /files                     — own files; ?document_id= forwards to /documents/:id/files
 POST   /files                     — upload + create new Document (409 on duplicate identity)
-GET    /files/:id                 — metadata / download / SSE (via Accept)
+GET    /files/:id                 — metadata / parsed artifact (`Accept: application/legistoso`) / download / SSE (via Accept)
 PATCH  /files/:id                 — update Expression-level fields (version_date, language, pub_*, etc.)
 DELETE /files/:id                 — 409 if status=processing
-GET    /files/:id/parsed          — parsed.json content (409 if not done, 404 if file missing)
 
 POST   /webhooks                  — URL and events validated; events must be from known list
 GET    /webhooks
@@ -341,7 +340,7 @@ Tracking options:
 1. `POST /files` + `Accept: text/event-stream` — sync, stream progress in response
 2. `POST /files` + `Accept: application/json` — async, poll `GET /files/:id`
 3. `GET /files/:id` + `Accept: text/event-stream` — subscribe at any time
-4. `GET /files/:id/parsed` — fetch final result when done
+4. `GET /files/:id` with `Accept: application/legistoso` — fetch parsed.json when done
 5. Webhooks — `file.parsed` / `file.failed` events
 
 ## Diff Pipeline (planned)
