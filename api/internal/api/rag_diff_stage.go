@@ -12,6 +12,7 @@ import (
 	"time"
 
 	embedder "github.com/nadevko/legist/internal/embed"
+	"github.com/nadevko/legist/internal/llm"
 	"github.com/nadevko/legist/internal/qdrant"
 	"github.com/nadevko/legist/internal/parser"
 	"github.com/nadevko/legist/internal/store"
@@ -144,6 +145,19 @@ func (s *Server) runRagDiffStage(ctx context.Context, diffID string, d *store.Di
 		HTTPClient: embedder.NewHTTPClient(time.Duration(s.cfg.EmbedHTTPTimeoutMS) * time.Millisecond),
 	}
 
+	// Provider for the "smart" LLM analysis stage (RAG-diff).
+	analysisHTTPClient := &http.Client{Timeout: 120 * time.Second}
+	var analysisProvider llm.Provider
+	switch strings.ToLower(strings.TrimSpace(s.cfg.LLMAnalysisProvider)) {
+	case "", "ollama":
+		analysisProvider = llm.NewOllamaProvider(s.cfg.OllamaBaseURL, analysisHTTPClient)
+	case "openai", "openai_compatible", "openai-compatible":
+		analysisProvider = llm.NewOpenAICompatibleProvider(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey, analysisHTTPClient)
+	default:
+		// Keep service operational; fall back to Ollama.
+		analysisProvider = llm.NewOllamaProvider(s.cfg.OllamaBaseURL, analysisHTTPClient)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	report := ragDiffReport{
 		DiffID:    diffID,
@@ -159,10 +173,7 @@ func (s *Server) runRagDiffStage(ctx context.Context, diffID string, d *store.Di
 		smart     *ragDiffSmartResult
 	}
 
-	maxPromptChars := s.cfg.MetadataWindowSize * 2
-	if maxPromptChars < 4000 {
-		maxPromptChars = 8000
-	}
+	smartDisabled := false
 
 	for start := 0; start < len(cands); start += s.cfg.EmbedBatchSize {
 		end := start + s.cfg.EmbedBatchSize
@@ -192,6 +203,9 @@ func (s *Server) runRagDiffStage(ctx context.Context, diffID string, d *store.Di
 
 		// 3) For each change: stream qdrant hits, call smart LLM, stream result.
 		for i, c := range batch {
+			if smartDisabled {
+				break
+			}
 			_ = i
 			hits := []qdrantHitSlim{}
 			if i < len(hitSets) {
@@ -217,8 +231,17 @@ func (s *Server) runRagDiffStage(ctx context.Context, diffID string, d *store.Di
 
 			ctxString := buildQdrantContextString(hits)
 			prompt := s.buildRagDiffSmartPrompt(c.wasText, c.isText, ctxString, doc)
-			smartOut, err := callOllamaGenerateJSON(ctx, s.cfg.OllamaBaseURL, s.cfg.AnalysisModel, prompt)
+			smartOut, err := callLLMGenerateSmartJSON(ctx, analysisProvider, s.cfg.AnalysisModel, prompt)
 			if err != nil {
+				if llm.IsModelMissing(err) {
+					// Surface provisioning error once; stop further smart LLM calls.
+					s.publishDiffEvent(diffID, "rag_diff_llm_model_missing", map[string]any{
+						"diff_id": diffID,
+						"error":   err.Error(),
+					})
+					smartDisabled = true
+					break
+				}
 				// Still store qdrant hits; smart result stays nil.
 				report.Changes = append(report.Changes, ragDiffChangeReport{
 					LeftChunkIndex:  c.leftI,
@@ -249,6 +272,9 @@ func (s *Server) runRagDiffStage(ctx context.Context, diffID string, d *store.Di
 				"right_chunk_index": c.rightJ,
 				"smart": smartOut,
 			})
+		}
+		if smartDisabled {
+			break
 		}
 	}
 
@@ -321,6 +347,17 @@ func (s *Server) buildRagDiffSmartPrompt(was, is, context string, doc *store.Doc
 		out = out[:maxChars]
 	}
 	return out
+}
+
+func callLLMGenerateSmartJSON(ctx context.Context, provider llm.Provider, model, prompt string) (*ragDiffSmartResult, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("llm provider is nil")
+	}
+	raw, err := provider.Generate(ctx, model, prompt)
+	if err != nil {
+		return nil, err
+	}
+	return parseRagDiffSmartJSON(raw)
 }
 
 func callOllamaGenerateJSON(ctx context.Context, baseURL, model, prompt string) (*ragDiffSmartResult, error) {

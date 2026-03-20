@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/nadevko/legist/internal/llm"
 )
 
 // ---------------------------------------------------------------------------
@@ -149,7 +151,7 @@ func (m LLMMeta) EffectiveDate() string {
 
 // MetaExtractorConfig holds extraction dependencies.
 type MetaExtractorConfig struct {
-	OllamaBaseURL string
+	Provider llm.Provider
 	MetadataModel string
 	MaxRetries    int
 	HTTPTimeout   time.Duration
@@ -162,15 +164,13 @@ type MetaExtractorConfig struct {
 // endWindow covers the document tail (lifecycle, effective date, references).
 // Returns the best merged result across all retries.
 // ok=false means required Work fields (subtype, number, date) are still missing.
-func ExtractMeta(ctx context.Context, cfg MetaExtractorConfig, startWindow, endWindow string) (LLMMeta, bool) {
+func ExtractMeta(ctx context.Context, cfg MetaExtractorConfig, startWindow, endWindow string) (LLMMeta, bool, error) {
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = 3
 	}
 	if cfg.HTTPTimeout == 0 {
 		cfg.HTTPTimeout = 60 * time.Second
 	}
-
-	client := &http.Client{Timeout: cfg.HTTPTimeout}
 
 	combined := startWindow
 	if endWindow != "" && endWindow != startWindow {
@@ -183,10 +183,16 @@ func ExtractMeta(ctx context.Context, cfg MetaExtractorConfig, startWindow, endW
 	bestScore := -1
 
 	for attempt := 1; attempt <= cfg.MaxRetries; attempt++ {
-		raw, err := callOllama(ctx, client, cfg.OllamaBaseURL, cfg.MetadataModel, prompt)
+		ctxAttempt, cancel := context.WithTimeout(ctx, cfg.HTTPTimeout)
+		raw, err := cfg.Provider.Generate(ctxAttempt, cfg.MetadataModel, prompt)
+		cancel()
 		if err != nil {
+			if llm.IsModelMissing(err) {
+				return LLMMeta{}, false, err
+			}
 			continue
 		}
+
 		meta, score, err := parseAndValidateMeta(raw)
 		if err != nil {
 			continue
@@ -208,7 +214,7 @@ func ExtractMeta(ctx context.Context, cfg MetaExtractorConfig, startWindow, endW
 		best.Language = "rus"
 	}
 
-	return best, hasRequiredFields(best)
+	return best, hasRequiredFields(best), nil
 }
 
 func hasRequiredFields(m LLMMeta) bool {

@@ -67,6 +67,12 @@
 // @description     `similarity_percent` is weighted similarity: `sum(sim_i*weight_left_i)/max(sumWeightsLeft,sumWeightsRight)*100`.
 // @description     Use `expand[]=document`, `left_file`, `right_file` on list/get. `Accept: text/event-stream` on create or get streams until `diff_done` or `diff_failed`.
 // @description
+// @description     After `matching`, the service runs a best-effort `rag-diff` stage:
+// @description     - re-embeds WAS/IS change texts with the Qdrant prefix
+// @description     - performs batched Qdrant searches with payload enabled
+// @description     - streams `rag_diff_qdrant_hit` and `rag_diff_result` SSE events
+// @description     The final RAG report is stored on disk at `DATA_PATH/diff/{diff_id}` for optional report export.
+// @description
 // @description     ### SSE progress stages
 // @description     | Stage | Description |
 // @description     |-------|-------------|
@@ -79,8 +85,16 @@
 // @description     | `embedding` | Embedding progress (`embedding_percent`, `chunks_embedded`, `chunks_total`; throttled by `EMBED_PROGRESS_INTERVAL_MS`) |
 // @description     | `embedding_done` | Embeddings written to legist JSON |
 // @description     | `matching` | Diff chunk matching progress (cosine + greedy one-to-one); `embedding_percent` carries similarity progress based on `N_left` |
+// @description     | `rag_diff_qdrant_hit` | Emitted for each Qdrant hit used as RAG context (includes lightweight payload) |
+// @description     | `rag_diff_result` | Emitted after smart LLM returns JSON for a change candidate |
+// @description     | `rag_diff_llm_model_missing` | Emitted when the smart LLM model is missing and pull started (report continues without smart results) |
 // @description     | `done` | Processing complete (parse + metadata + embeddings) |
 // @description     | `failed` | Processing failed; `error` and `missing_fields` present |
+// @description
+// @description     ## Report export
+// @description     `GET /reports/:diff_id` generates (on-demand) an optional DOCX report from the stored RAG-diff JSON.
+// @description     - If `lazy=true` (default) and the report does not exist, returns 404.
+// @description     - If `lazy=false`, it best-effort generates the report from existing `DATA_PATH/diff/{diff_id}`.
 // @description
 // @description     ## AKN metadata
 // @description     Metadata follows Akoma Ntoso conventions. Work-level fields (`subtype`, `number`,

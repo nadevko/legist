@@ -44,6 +44,7 @@ type ProgressFunc func(ParseProgress)
 type metaResult struct {
 	meta LLMMeta
 	ok   bool
+	err  error
 }
 
 // PipelineConfig carries all inputs for the processing pipeline.
@@ -186,14 +187,17 @@ func Run(ctx context.Context, cfg PipelineConfig, onProgress ProgressFunc) (*Pip
 		emit(StageLLMRequested, fmt.Sprintf("extracting AKN metadata (chars=%d)", len(startW)))
 		metaCh = make(chan metaResult, 1)
 		go func() {
-			meta, ok := ExtractMeta(ctx, cfg.MetaExtractor, startW, endW)
-			metaCh <- metaResult{meta, ok}
+			meta, ok, err := ExtractMeta(ctx, cfg.MetaExtractor, startW, endW)
+			metaCh <- metaResult{meta: meta, ok: ok, err: err}
 		}()
 	}
 
 	// LLM may still be running while full parse is already completed.
 	if needLLM && metaCh != nil {
 		mr := <-metaCh
+		if mr.err != nil {
+			return nil, fail("metadata extraction failed", mr.err)
+		}
 		score := mr.meta.Score()
 		okVal := mr.ok
 		emit(StageLLMDone,

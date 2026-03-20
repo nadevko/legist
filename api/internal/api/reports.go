@@ -14,6 +14,17 @@ import (
 	"github.com/nadevko/legist/internal/store"
 )
 
+// handleGetReport godoc
+// @Summary     Get optional DOCX report for an annotated diff
+// @Tags        Reports
+// @Security    BearerAuth
+// @Produce     application/vnd...docx
+// @Param       diff_id  path   string  true  "Diff ID"
+// @Param       lazy     query  boolean false "If true (default) and report missing -> 404; if false -> best-effort generate from rag-diff JSON"
+// @Failure     400 {object} apiErrorResponse
+// @Failure     404 {object} apiErrorResponse
+// @Failure     500 {object} apiErrorResponse
+// @Router      /reports/:diff_id [get]
 func (s *Server) handleGetReport(c echo.Context) error {
 	diffID := strings.TrimSpace(c.Param("diff_id"))
 	if diffID == "" {

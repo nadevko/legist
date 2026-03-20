@@ -36,6 +36,10 @@ type Config struct {
 	MetadataModel string
 	AnalysisModel string
 
+	// OpenAI-compatible provider (optional; used when LLM*_PROVIDER != "ollama").
+	OpenAIBaseURL string
+	OpenAIAPIKey  string
+
 	LLMMetadataProvider string
 	LLMAnalysisProvider string
 	AnthropicAPIKey     string
@@ -92,6 +96,9 @@ func Load() *Config {
 		MetadataModel string `env:"METADATA_MODEL" envDefault:"qwen2.5:3b"`
 		AnalysisModel string `env:"ANALYSIS_MODEL" envDefault:"qwen2.5:7b"`
 
+		OpenAIBaseURL string `env:"OPENAI_BASE_URL"`
+		OpenAIAPIKey  string `env:"OPENAI_API_KEY"`
+
 		LLMMetadataProvider string `env:"LLM_METADATA" envDefault:"ollama"`
 		LLMAnalysisProvider string `env:"LLM_ANALYSIS" envDefault:"ollama"`
 		AnthropicAPIKey     string `env:"ANTHROPIC_API_KEY"`
@@ -141,6 +148,9 @@ func Load() *Config {
 		EmbedModel:    e.EmbedModel,
 		MetadataModel: e.MetadataModel,
 		AnalysisModel: e.AnalysisModel,
+
+		OpenAIBaseURL: e.OpenAIBaseURL,
+		OpenAIAPIKey:  e.OpenAIAPIKey,
 
 		LLMMetadataProvider: e.LLMMetadataProvider,
 		LLMAnalysisProvider: e.LLMAnalysisProvider,

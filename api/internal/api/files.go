@@ -16,6 +16,7 @@ import (
 
 	"github.com/nadevko/legist/internal/auth"
 	embedder "github.com/nadevko/legist/internal/embed"
+	"github.com/nadevko/legist/internal/llm"
 	"github.com/nadevko/legist/internal/parser"
 	"github.com/nadevko/legist/internal/sse"
 	"github.com/nadevko/legist/internal/store"
@@ -450,13 +451,38 @@ func (s *Server) processFileWithChannel(f *store.File, doc *store.Document, ch *
 		KnownPubDate:       strVal(f.PubDate),
 		KnownPubNumber:     strVal(f.PubNumber),
 
-		MetaExtractor: parser.MetaExtractorConfig{
-			OllamaBaseURL:     s.cfg.OllamaBaseURL,
-			MetadataModel:     s.cfg.MetadataModel,
-			MaxRetries:        s.cfg.MetadataMaxRetries,
-			HTTPTimeout:       time.Duration(s.cfg.MetadataHTTPTimeoutMS) * time.Millisecond,
-			MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
-		},
+		MetaExtractor: func() parser.MetaExtractorConfig {
+			httpTimeout := time.Duration(s.cfg.MetadataHTTPTimeoutMS) * time.Millisecond
+			httpClient := &http.Client{Timeout: httpTimeout}
+
+			switch strings.ToLower(strings.TrimSpace(s.cfg.LLMMetadataProvider)) {
+			case "", "ollama":
+				return parser.MetaExtractorConfig{
+					Provider: llm.NewOllamaProvider(s.cfg.OllamaBaseURL, httpClient),
+					MetadataModel:     s.cfg.MetadataModel,
+					MaxRetries:        s.cfg.MetadataMaxRetries,
+					HTTPTimeout:       httpTimeout,
+					MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
+				}
+			case "openai", "openai_compatible", "openai-compatible":
+				return parser.MetaExtractorConfig{
+					Provider: llm.NewOpenAICompatibleProvider(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey, httpClient),
+					MetadataModel:     s.cfg.MetadataModel,
+					MaxRetries:        s.cfg.MetadataMaxRetries,
+					HTTPTimeout:       httpTimeout,
+					MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
+				}
+			default:
+				// Unknown provider: fall back to Ollama to keep service operational.
+				return parser.MetaExtractorConfig{
+					Provider: llm.NewOllamaProvider(s.cfg.OllamaBaseURL, httpClient),
+					MetadataModel:     s.cfg.MetadataModel,
+					MaxRetries:        s.cfg.MetadataMaxRetries,
+					HTTPTimeout:       httpTimeout,
+					MetadataLLMPrompt: s.cfg.MetadataLLMPrompt,
+				}
+			}
+		}(),
 		WindowSize: s.cfg.MetadataWindowSize,
 		WeightConfig: parser.ChunkWeightConfig{
 			Critical:  s.cfg.WeightCritical,

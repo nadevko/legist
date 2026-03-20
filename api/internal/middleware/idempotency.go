@@ -11,14 +11,19 @@ import (
 )
 
 // Idempotency creates a middleware that handles idempotent requests.
+// In dev we disable this middleware completely to avoid requiring `Idempotency-Key`.
 // POST requests require Idempotency-Key. PATCH and DELETE are optional.
-func Idempotency(idempotencyStore *store.IdempotencyStore) echo.MiddlewareFunc {
+func Idempotency(idempotencyStore *store.IdempotencyStore, dev bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			method := c.Request().Method
 			if method != http.MethodPost &&
 				method != http.MethodPatch &&
 				method != http.MethodDelete {
+				return next(c)
+			}
+
+			if dev {
 				return next(c)
 			}
 

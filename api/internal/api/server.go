@@ -64,7 +64,7 @@ func NewServer(cfg *config.Config, db *sqlx.DB) *Server {
 	e.Use(mw.Version())
 	e.Use(mw.TrailingSlash(cfg.BasePath))
 	e.Use(mw.Expand(s))
-	e.Use(mw.Idempotency(s.idempotency))
+	e.Use(mw.Idempotency(s.idempotency, cfg.Dev))
 	e.Use(mw.CORS(cfg))
 
 	s.registerRoutes()
