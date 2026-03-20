@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { User } from '../types'
 import { TOAST_MS } from '../utils/helpers'
+import { apiFetch } from '../utils/api'
 
 // ── AUTH STORE ──────────────────────────────────────────────
 interface AuthStore {
@@ -25,8 +26,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   login: async (email, password, name) => {
     const isRegister = !!name
     const endpoint = isRegister ? '/api/users' : '/api/sessions'
-    
-    const res = await fetch(endpoint, {
+
+    const res = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -37,7 +38,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     const data = await res.json()
     if (!res.ok) {
-      throw new Error(data.error?.message || 'Ошибка аутентификации')
+      throw new Error(data?.error?.message || 'Ошибка аутентификации')
     }
 
     // Если это была регистрация, нужно еще войти
@@ -51,19 +52,19 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       if (data.refresh_token) {
         localStorage.setItem('legist_refresh_token', data.refresh_token)
       }
-      
-      const userRes = await fetch('/api/me', {
+
+      const userRes = await apiFetch('/api/me', {
         headers: {
           'Authorization': `Bearer ${data.access_token}`
         }
       })
-      
+
       let user = { name: data.email?.split('@')[0] || 'Пользователь', email: data.email || '' }
       if (userRes.ok) {
         const userData = await userRes.json()
         user = { name: userData.email.split('@')[0], email: userData.email }
       }
-      
+
       localStorage.setItem('legist_user', JSON.stringify(user))
       set({ isAuthenticated: true, currentUser: user })
       return // Успешное завершение после установки стейта

@@ -37,7 +37,7 @@ export default function AuthPage() {
     try {
       await login(form.email, form.password, mode === 'register' ? form.name : undefined)
       navigate('/')
-    } catch {
+    } catch (err) {
       setErrors(e => ({ ...e, email: 'Ошибка входа' }))
     } finally { setLoading(false) }
   }

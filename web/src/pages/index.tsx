@@ -4,6 +4,7 @@ import { ACTS_DATA, CHANGES_DATA, HIERARCHY_DATA, VIOLATIONS_DATA, CHAIN_VERSION
 import { useUIStore, useCompareStore } from '../store'
 import { useFileUpload, useCompareProgress, useAssistant } from '../hooks'
 import { rBdg, rFull, pl, esc, PROGRESS_STEPS } from '../utils/helpers'
+import { apiFetch } from '../utils/api'
 import type { Version, Risk } from '../types'
 
 // ─────────────────────────────────────────────────────────
@@ -28,7 +29,7 @@ export function ActDetailPage() {
       const token = localStorage.getItem('legist_token')
       if (!token) { setLoading(false); return }
       try {
-        const res = await fetch('/api/files', {
+        const res = await apiFetch('/api/files', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -49,6 +50,7 @@ export function ActDetailPage() {
         }
       } catch (err) {
         console.error('Fetch files error:', err)
+        showToast('⚠ Ошибка загрузки файлов')
       }
     }
     fetchFiles()
@@ -76,7 +78,7 @@ export function ActDetailPage() {
 
     const token = localStorage.getItem('legist_token')
     try {
-      const res = await fetch(`/api/files/${v.id}`, {
+      const res = await apiFetch(`/api/files/${v.id}`, {
         method: 'DELETE',
         headers: { 
           'Authorization': `Bearer ${token}`,
@@ -89,10 +91,11 @@ export function ActDetailPage() {
         if (selected?.id === v.id) setSelected(null)
       } else {
         const data = await res.json()
-        showToast('⚠ ' + (data.error?.message || 'Ошибка удаления'))
+        showToast('⚠ ' + (data?.error?.message || 'Ошибка удаления'))
       }
     } catch (err) {
-      showToast('⚠ Ошибка сети')
+      const msg = err instanceof Error ? err.message : 'Ошибка сети'
+      showToast('⚠ ' + msg)
     }
   }
 
@@ -108,9 +111,9 @@ export function ActDetailPage() {
 
   const changeRows = useMemo(() => selected ? CHANGES_DATA.slice(0, selected.changes) : [], [selected])
   const summary = useMemo(() => ({
-    red: changeRows.filter(r => r.risk === 'red').length,
-    orange: changeRows.filter(r => r.risk === 'orange').length,
-    green: changeRows.filter(r => r.risk === 'green').length,
+    red: changeRows.filter((r: any) => r.risk === 'red').length,
+    orange: changeRows.filter((r: any) => r.risk === 'orange').length,
+    green: changeRows.filter((r: any) => r.risk === 'green').length,
   }), [changeRows])
 
   if (loading && rows.length === 0) return <div className="page" style={{ padding: 32, textAlign: 'center' }}>Загрузка акта...</div>
@@ -242,7 +245,7 @@ export function ActDetailPage() {
                     <th style={{ width: 36 }}>#</th><th>Раздел</th><th>Было</th><th>Стало</th><th>Тип изменения</th><th>Риск</th><th>Закон</th><th>Рекомендация</th>
                   </tr></thead>
                   <tbody>
-                    {changeRows.map(r => (
+                    {changeRows.map((r: any) => (
                       <tr key={r.n}>
                         <td style={{ color: 'var(--faint)', fontSize: 12 }}>{r.n}</td>
                         <td className="td-s">{r.s}</td>
@@ -309,7 +312,7 @@ export function HomePage() {
       const token = localStorage.getItem('legist_token')
       if (!token) return
       try {
-        const res = await fetch('/api/files?limit=3', {
+        const res = await apiFetch('/api/files?limit=3', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -492,7 +495,7 @@ export function ComparePage() {
   // Real CSV export — no backend needed
   const exportCSV = (data: typeof CHANGES_DATA) => {
     const headers = ['№', 'Раздел', 'Было', 'Стало', 'Тип изменения', 'Риск', 'Закон', 'Рекомендация']
-    const rows = data.map(r => [r.n, r.s, r.old, r.nw, r.type, rFull(r.risk), r.law, r.rec]
+    const rows = data.map((r: any) => [r.n, r.s, r.old, r.nw, r.type, rFull(r.risk), r.law, r.rec]
       .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
     const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -703,7 +706,7 @@ export function ComparePage() {
           </div>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Иерархия законодательства Республики Беларусь</h3>
           <div className="hier-list">
-            {HIERARCHY_DATA.map(h => (
+            {HIERARCHY_DATA.map((h: any) => (
               <div key={h.n} className="hier-item">
                 <span className="hi-num">{h.n}</span>
                 <span className="hi-txt">{h.text}</span>
@@ -713,7 +716,7 @@ export function ComparePage() {
           </div>
           <h3 style={{ fontSize: 14, fontWeight: 700, margin: '28px 0 12px' }}>Выявленные нарушения и противоречия</h3>
           <div className="viol-list">
-            {VIOLATIONS_DATA.map(v => (
+            {VIOLATIONS_DATA.map((v: any) => (
               <div key={v.s} className={`viol-card${v.risk === 'orange' ? ' warn' : ''}`}>
                 <div className="viol-top"><span className="viol-sec">{v.s}</span><span className={`bdg ${rBdg(v.risk)}`}>{rFull(v.risk)}</span></div>
                 <p className="viol-txt">{v.text}</p>

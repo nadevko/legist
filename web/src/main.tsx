@@ -4,7 +4,13 @@ import './styles/globals.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+  // Отключаем StrictMode в development для избежания двойной анимации
+  // В production StrictMode не включается
+  import.meta.env.DEV ? (
     <App/>
-  </StrictMode>
+  ) : (
+    <StrictMode>
+      <App/>
+    </StrictMode>
+  )
 )

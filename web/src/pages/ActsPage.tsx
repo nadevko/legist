@@ -5,6 +5,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store'
 import { pl, rBdg, rFull } from '../utils/helpers'
+import { apiFetch } from '../utils/api'
 
 export function ActsPage() {
   const navigate = useNavigate()
@@ -23,7 +24,7 @@ export function ActsPage() {
       const token = localStorage.getItem('legist_token')
       if (!token) { setLoading(false); return }
       try {
-        const res = await fetch('/api/files', {
+        const res = await apiFetch('/api/files', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -42,6 +43,7 @@ export function ActsPage() {
         }
       } catch (err) {
         console.error('Fetch acts error:', err)
+        showToast('Ошибка загрузки файлов')
       } finally {
         setLoading(false)
       }

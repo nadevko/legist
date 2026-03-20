@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '../../store'
 import { ACTS_DATA } from '../../data'
+import { apiFetch } from '../../utils/api'
 
 interface Props { mobOpen?: boolean; onClose?: () => void }
 
@@ -18,7 +19,7 @@ export default function Sidebar({ mobOpen, onClose }: Props) {
       const token = localStorage.getItem('legist_token')
       if (!token) return
       try {
-        const res = await fetch('/api/files', {
+        const res = await apiFetch('/api/files', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -27,6 +28,7 @@ export default function Sidebar({ mobOpen, onClose }: Props) {
         }
       } catch (err) {
         console.error('Sidebar fetch error:', err)
+        setFileCount(0)
       }
     }
     fetchCount()
@@ -46,12 +48,7 @@ export default function Sidebar({ mobOpen, onClose }: Props) {
       {/* Brand — click goes to home */}
       <div className="sb-brand" onClick={() => go('/')} title="На главную">
         <div className="sb-logo">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="9" y1="13" x2="15" y2="13"/>
-            <line x1="9" y1="17" x2="12" y2="17"/>
-          </svg>
+          <img src="/stork.png" alt="legist" style={{ width: 22, height: 22, objectFit: 'cover' }} />
         </div>
         <div>
           <span className="sb-name">legist</span>
